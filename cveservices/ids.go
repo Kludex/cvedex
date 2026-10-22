@@ -118,21 +118,33 @@ func (c *Client) Reject(ctx context.Context, id string, cna json.RawMessage) (js
 }
 
 func (c *Client) writeRecord(ctx context.Context, method, path string, cna json.RawMessage) (json.RawMessage, error) {
-	var out writeResult
-	err := c.Do(ctx, method, path, nil, map[string]json.RawMessage{"cnaContainer": cna}, &out)
-	return out.record(), err
+	var body json.RawMessage
+	err := c.Do(ctx, method, path, nil, map[string]json.RawMessage{"cnaContainer": cna}, &body)
+	return written(body), err
 }
 
-// writeResult is the body of a successful record write: the record is under `created` for a
-// publish or reject, and `updated` for an update.
-type writeResult struct {
-	Created json.RawMessage `json:"created"`
-	Updated json.RawMessage `json:"updated"`
-}
-
-func (w writeResult) record() json.RawMessage {
-	if w.Updated != nil {
-		return w.Updated
+// written picks the record out of a write's response: under `created` for a publish or reject and
+// `updated` for an update. cvedexd answers a submitter with {message, state: "in_review"} instead,
+// returned as is.
+func written(body json.RawMessage) json.RawMessage {
+	var out struct {
+		Created json.RawMessage `json:"created"`
+		Updated json.RawMessage `json:"updated"`
 	}
-	return w.Created
+	_ = json.Unmarshal(body, &out)
+	switch {
+	case out.Updated != nil:
+		return out.Updated
+	case out.Created != nil:
+		return out.Created
+	}
+	return body
+}
+
+// InReview reports whether a write went to cvedexd's review queue instead of CVE Services.
+func InReview(written json.RawMessage) bool {
+	var out struct {
+		State string `json:"state"`
+	}
+	return json.Unmarshal(written, &out) == nil && out.State == "in_review"
 }

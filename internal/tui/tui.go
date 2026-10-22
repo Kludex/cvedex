@@ -5,6 +5,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -35,6 +36,9 @@ const (
 	tabAudit
 )
 
+// maxDetails is how many lines of an error's details the status area shows.
+const maxDetails = 5
+
 var tabNames = []string{"CVE IDs", "Review", "Proposals", "Audit"}
 
 // Model is the interface's state. Drive it with tea messages.
@@ -54,6 +58,7 @@ type Model struct {
 	err      error
 	question string
 	answer   tea.Cmd
+	drafts   map[string]draft
 
 	ids       []cveservices.CVEID
 	review    []cveservices.ReviewItem
@@ -79,6 +84,7 @@ func New(ctx context.Context, client *cveservices.Client) Model {
 		width:   100,
 		height:  30,
 		loading: true,
+		drafts:  map[string]draft{},
 	}
 }
 
@@ -100,6 +106,8 @@ type (
 	doneMsg struct {
 		flash string
 		err   error
+		// saved is the ID whose draft was sent.
+		saved string
 	}
 )
 
@@ -137,14 +145,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case recordMsg:
 		m.loading, m.err = false, msg.err
-		if msg.err == nil {
+		switch {
+		case noRecord(msg.err):
+			m.err, m.flash = nil, msg.id+" has no record yet. Press e to write one."
+		case msg.err == nil:
 			m.open(msg.id, msg.record)
 		}
 		return m, nil
+	case draftMsg:
+		m.loading, m.err = false, msg.err
+		if msg.err != nil {
+			return m, nil
+		}
+		m.drafts[msg.draft.id] = msg.draft
+		return m, openEditor(msg.draft)
+	case editedMsg:
+		m.edited(msg)
+		return m, nil
 	case doneMsg:
-		m.err = msg.err
-		if msg.err == nil {
-			m.flash = msg.flash
+		m.loading, m.err = false, msg.err
+		if msg.err != nil {
+			return m, nil
+		}
+		m.flash = msg.flash
+		m.discard(msg.saved)
+		if m.reading == msg.saved {
+			m.reading = ""
 		}
 		return m, m.load(m.tab)
 	case tea.KeyPressMsg:
@@ -168,9 +194,13 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	if m.reading != "" {
-		if k == "esc" || k == "backspace" || k == "left" || k == "h" {
+		switch {
+		case k == "esc" || k == "backspace" || k == "left" || k == "h":
 			m.reading = ""
 			return m, nil
+		case k == "e" && m.tab == tabIDs:
+			m.flash, m.err, m.loading = "", nil, true
+			return m, m.edit(m.reading)
 		}
 		var cmd tea.Cmd
 		m.reader, cmd = m.reader.Update(msg)
@@ -192,6 +222,11 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.load(m.tab)
 	case "enter":
 		return m, m.enter()
+	case "e":
+		if id, ok := pick(m.ids, m.table.Cursor(), m.tab == tabIDs); ok {
+			m.loading = true
+			return m, m.edit(id.ID)
+		}
 	case "n":
 		if m.tab == tabIDs {
 			year := time.Now().Year()
@@ -402,35 +437,61 @@ func (m Model) View() tea.View {
 	right := render.Faint.Render(strings.TrimPrefix(creds.URL, "https://") + " · " + creds.User + " ")
 	header := left + strings.Repeat(" ", max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 1)) + right
 
-	body := m.table.View()
+	status := []string{""}
+	var apiErr *cveservices.Error
+	switch {
+	case m.question != "":
+		status[0] = render.Warn.Render(m.question) + render.Faint.Render(" y/n")
+	case m.err != nil:
+		status[0] = render.Bad.Render(m.err.Error())
+		if errors.As(m.err, &apiErr) {
+			details := render.ErrorDetails(apiErr.Details)
+			if len(details) > maxDetails {
+				details = append(details[:maxDetails], render.Faint.Render(fmt.Sprintf("and %d more", len(details)-maxDetails)))
+			}
+			for _, detail := range details {
+				status = append(status, "  "+detail)
+			}
+		}
+	case m.loading:
+		status[0] = m.spinner.View() + render.Faint.Render(" Loading")
+	case m.flash != "":
+		status[0] = render.Good.Render(m.flash)
+	case m.reading == "" && len(m.table.Rows()) == 0:
+		status[0] = render.Faint.Render("Nothing here yet.")
+	}
+
+	height := max(m.height-4-(len(status)-1), 3)
 	hints := "↑↓ move · enter open · tab switch · r refresh · q quit"
+	var body string
 	switch {
 	case m.reading != "":
-		body = m.reader.View()
+		reader := m.reader
+		reader.SetHeight(height)
+		body = reader.View()
 		hints = "↑↓ scroll · esc back · q quit"
+		if m.tab == tabIDs {
+			hints = "↑↓ scroll · e edit · esc back · q quit"
+		}
 	case m.tab == tabIDs:
-		hints = "↑↓ move · enter open · n new ID · tab switch · r refresh · q quit"
+		hints = "↑↓ move · enter open · e edit · n new ID · tab switch · r refresh · q quit"
 	case m.tab == tabReview:
 		hints = "↑↓ move · enter read · a approve · tab switch · r refresh · q quit"
 	case m.tab == tabProposals:
 		hints = "↑↓ move · a approve · d deny · tab switch · r refresh · q quit"
 	}
-
-	status := ""
-	switch {
-	case m.question != "":
-		status = render.Warn.Render(m.question) + render.Faint.Render(" y/n")
-	case m.err != nil:
-		status = render.Bad.Render(m.err.Error())
-	case m.loading:
-		status = m.spinner.View() + render.Faint.Render(" Loading")
-	case m.flash != "":
-		status = render.Good.Render(m.flash)
-	case m.reading == "" && len(m.table.Rows()) == 0:
-		status = render.Faint.Render("Nothing here yet.")
+	if body == "" {
+		table := m.table
+		table.SetHeight(height)
+		body = table.View()
 	}
 
-	v := tea.NewView(strings.Join([]string{header, "", body, " " + status, " " + render.Faint.Render(hints)}, "\n"))
+	lines := append([]string{header, "", body}, status...)
+	lines = append(lines, render.Faint.Render(hints))
+	for i := 3; i < len(lines); i++ {
+		lines[i] = " " + lines[i]
+	}
+	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
 	v.WindowTitle = "cvedex"
 	return v

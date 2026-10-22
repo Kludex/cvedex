@@ -181,7 +181,7 @@ func hint(text, command string) string {
 func (a *app) printAPIError(e *cveservices.Error) {
 	var b strings.Builder
 	b.WriteString(render.Bad.Render("Error:") + " " + e.Error())
-	for _, detail := range errorDetails(e.Details) {
+	for _, detail := range render.ErrorDetails(e.Details) {
 		b.WriteString("\n  " + detail)
 	}
 	switch e.Status {
@@ -191,32 +191,4 @@ func (a *app) printAPIError(e *cveservices.Error) {
 		b.WriteString("\n" + render.Faint.Render("Your user is not allowed to do this."))
 	}
 	_, _ = lipgloss.Fprintln(a.stderr, b.String())
-}
-
-// errorDetails flattens the two shapes CVE Services uses for validation errors.
-func errorDetails(raw json.RawMessage) []string {
-	var schema struct {
-		Errors []struct {
-			Path    string `json:"instancePath"`
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	var params []struct {
-		Param   string `json:"param"`
-		Message string `json:"msg"`
-	}
-	var out []string
-	switch {
-	case json.Unmarshal(raw, &schema) == nil && len(schema.Errors) > 0:
-		for _, e := range schema.Errors {
-			out = append(out, render.Faint.Render(e.Path+":")+" "+e.Message)
-		}
-	case json.Unmarshal(raw, &params) == nil:
-		for _, p := range params {
-			out = append(out, render.Faint.Render(p.Param+":")+" "+p.Message)
-		}
-	case len(raw) > 0:
-		out = append(out, render.Faint.Render(string(raw)))
-	}
-	return out
 }

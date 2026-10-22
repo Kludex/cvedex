@@ -187,6 +187,13 @@ func TestCommands(t *testing.T) {
 		{name: "publish from stdin", exchanges: []cassette.Exchange{publish}, stdin: string(sent.CNA),
 			args: []string{"publish", "CVE-2026-1100", "-"}, stdout: []string{"Published CVE-2026-1100"}},
 		{
+			name: "publish as a cvedexd submitter",
+			exchanges: []cassette.Exchange{{Method: "POST", Path: "/api/cve/CVE-2026-1100/cna", Body: publish.Body,
+				Response: `{"message":"CVE-2026-1100 was submitted for review","state":"in_review"}`}},
+			args:   []string{"publish", "CVE-2026-1100", bare},
+			stdout: []string{"Sent CVE-2026-1100 for review"},
+		},
+		{
 			name:      "publish an invalid record",
 			exchanges: []cassette.Exchange{cassette.Load(t, "bad-request")},
 			args:      []string{"publish", "CVE-2026-1100", "-"},

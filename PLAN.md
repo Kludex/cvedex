@@ -90,7 +90,9 @@ Stdio, JSON-RPC 2.0. Tools map 1:1 to CLI commands: `list_cves`, `show_cve`, `re
 
 ### TUI
 
-Tabs: CVE IDs (open a record, reserve), and against `cvedexd` review (read, approve), proposals (approve, deny) and audit. Every write asks y/n first.
+Tabs: CVE IDs (open a record, edit, reserve), and against `cvedexd` review (read, approve), proposals (approve, deny) and audit. Every write asks y/n first.
+
+`e` opens the CNA container in `$VISUAL` or `$EDITOR`, without the `providerMetadata` CVE Services fills in, or a template for a reserved ID. On save it asks to publish or update. A draft the API rejects is kept and reopens on the next `e`, with the validation errors shown under it.
 
 ## cvedexd (server)
 

@@ -168,6 +168,9 @@ func (a *app) write(cmd *cobra.Command, verb, id string, cna json.RawMessage, ye
 		return err
 	}
 	return a.output(record, func() string {
+		if cveservices.InReview(record) {
+			return render.Good.Render("Sent " + id + " for review")
+		}
 		return render.Good.Render(capitalize(pastTense(verb))+" "+id) + "\n\n" + render.Record(record, a.width())
 	})
 }

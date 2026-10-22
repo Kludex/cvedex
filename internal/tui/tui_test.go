@@ -2,8 +2,16 @@ package tui_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -174,7 +182,6 @@ func TestCvedexd(t *testing.T) {
 			Status:   502,
 			Response: `{"error":"UPSTREAM","message":"CVE Services is down"}`,
 		},
-		proposals,
 		cassette.Exchange{
 			Method:   "POST",
 			Path:     "/api/cvedexd/proposals/p1/deny",
@@ -210,4 +217,174 @@ func TestCvedexd(t *testing.T) {
 	s.shows("2026-10-22 10:00:00", "agent", "401")
 	s.press("down", "shift+tab")
 	s.shows("Proposals")
+}
+
+// TestMain lets the test binary act as $EDITOR: it saves the path and content it was given to
+// $CVEDEX_TEST_EDITOR_SAW, then writes $CVEDEX_TEST_EDITOR over the file unless it is empty.
+func TestMain(m *testing.M) {
+	content, ok := os.LookupEnv("CVEDEX_TEST_EDITOR")
+	if !ok {
+		os.Exit(m.Run())
+	}
+	path := os.Args[len(os.Args)-1]
+	original, err := os.ReadFile(path)
+	if err == nil {
+		err = os.WriteFile(os.Getenv("CVEDEX_TEST_EDITOR_SAW"), []byte(path+"\n"+string(original)), 0o600)
+	}
+	if err == nil && content != "" {
+		err = os.WriteFile(path, []byte(content), 0o600)
+	}
+	if err != nil {
+		os.Exit(1)
+	}
+}
+
+// program runs the interface in a real tea.Program, which editing needs to suspend it.
+type program struct {
+	t      *testing.T
+	p      *tea.Program
+	mu     sync.Mutex
+	screen string
+	saw    string
+}
+
+func runProgram(t *testing.T, exchanges ...cassette.Exchange) *program {
+	t.Helper()
+	url := cassette.Serve(t, exchanges...)
+	client := cveservices.New(cveservices.Credentials{URL: url, Org: "acme", User: "alice@acme.test", Key: "key"})
+	pr := &program{t: t, saw: filepath.Join(t.TempDir(), "saw")}
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", os.Args[0])
+	t.Setenv("CVEDEX_TEST_EDITOR_SAW", pr.saw)
+	pr.p = tea.NewProgram(tui.New(context.Background(), client),
+		tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithWindowSize(120, 20),
+		tea.WithFilter(func(m tea.Model, msg tea.Msg) tea.Msg {
+			pr.mu.Lock()
+			defer pr.mu.Unlock()
+			pr.screen = ansi.Strip(m.View().Content)
+			return msg
+		}))
+	done := make(chan struct{})
+	go func() {
+		_, _ = pr.p.Run()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		pr.p.Quit()
+		<-done
+	})
+	return pr
+}
+
+func (pr *program) press(k string, code rune) {
+	pr.p.Send(tea.KeyPressMsg{Code: code, Text: k})
+}
+
+// edit sets what the fake editor writes, then presses e.
+func (pr *program) edit(content string) {
+	pr.t.Setenv("CVEDEX_TEST_EDITOR", content)
+	pr.press("e", 'e')
+}
+
+func (pr *program) waitFor(want ...string) {
+	pr.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		pr.mu.Lock()
+		screen := pr.screen
+		pr.mu.Unlock()
+		missing := slices.IndexFunc(want, func(w string) bool { return !strings.Contains(screen, w) })
+		if missing < 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			pr.t.Fatalf("screen never showed %q:\n%s", want[missing], screen)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// sawEditing returns the path and content the fake editor last opened.
+func (pr *program) sawEditing() (string, string) {
+	pr.t.Helper()
+	data, err := os.ReadFile(pr.saw)
+	if err != nil {
+		pr.t.Fatal(err)
+	}
+	path, content, _ := strings.Cut(string(data), "\n")
+	return path, content
+}
+
+func TestEditReservedID(t *testing.T) {
+	publish := cassette.Load(t, "publish")
+	var sent struct {
+		CNA json.RawMessage `json:"cnaContainer"`
+	}
+	if err := json.Unmarshal([]byte(publish.Body), &sent); err != nil {
+		t.Fatal(err)
+	}
+	dne := cassette.Load(t, "cve-record-dne")
+	dne.Path = "/api/cve/CVE-2026-1101"
+	invalid := cassette.Load(t, "bad-request")
+	invalid.Path = "/api/cve/CVE-2026-1101/cna"
+	publish.Path = "/api/cve/CVE-2026-1101/cna"
+	list := cassette.Exchange{Method: "GET", Path: "/api/cve-id",
+		Response: `{"cve_ids":[{"cve_id":"CVE-2026-1101","state":"RESERVED"}]}`}
+	pr := runProgram(t, cassette.Load(t, "health-check"), list, dne, dne, invalid, publish, list)
+
+	pr.waitFor("CVE-2026-1101", "RESERVED", "e edit")
+	pr.press("", tea.KeyEnter)
+	pr.waitFor("CVE-2026-1101 has no record yet. Press e to write one.")
+
+	pr.edit("{}")
+	pr.waitFor("Publish CVE-2026-1101? It will be public. y/n")
+	if _, opened := pr.sawEditing(); !strings.Contains(opened, `"descriptions": [{"lang": "en", "value": ""}]`) {
+		t.Errorf("template: %s", opened)
+	}
+	pr.press("y", 'y')
+	pr.waitFor("press e to fix it", "INVALID_JSON_SCHEMA", "/cnaContainer:")
+
+	pr.edit(string(sent.CNA))
+	pr.waitFor("Publish CVE-2026-1101?")
+	path, opened := pr.sawEditing()
+	if opened != "{}" {
+		t.Errorf("the draft did not reopen: %s", opened)
+	}
+	pr.press("y", 'y')
+	pr.waitFor("Published CVE-2026-1101")
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("draft %s was not removed: %v", path, err)
+	}
+}
+
+func TestEditPublishedRecord(t *testing.T) {
+	record := cassette.Load(t, "cve-2025-0001")
+	record.Path = "/api/cve/CVE-2026-1099"
+	list := cassette.Load(t, "cve-id-list")
+	inReview := cassette.Exchange{Method: "PUT", Path: "/api/cve/CVE-2026-1099/cna",
+		Response: `{"message":"CVE-2026-1099 was submitted for review","state":"in_review"}`}
+	pr := runProgram(t, cassette.Load(t, "health-check"), list, record, record, record, inReview, list)
+
+	pr.waitFor("CVE-2026-1099")
+	pr.press("", tea.KeyEnter)
+	pr.waitFor("References", "e edit")
+
+	pr.edit("")
+	pr.waitFor("No changes to CVE-2026-1099")
+	_, opened := pr.sawEditing()
+	if strings.Contains(opened, "providerMetadata") || !strings.Contains(opened, `"descriptions"`) {
+		t.Errorf("container: %s", opened)
+	}
+
+	pr.edit("not json")
+	pr.waitFor("CVE-2026-1099 is not valid JSON, press e to fix it")
+	t.Setenv("VISUAL", "cvedex-no-such-editor")
+	pr.edit("")
+	pr.waitFor("editor: exec:")
+	t.Setenv("VISUAL", "")
+
+	pr.edit(`{"descriptions":[{"lang":"en","value":"Changed."}]}`)
+	pr.waitFor("Update CVE-2026-1099? It will be public. y/n")
+	pr.press("y", 'y')
+	pr.waitFor("Sent for review: CVE-2026-1099", "n new ID")
 }

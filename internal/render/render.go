@@ -2,6 +2,7 @@
 package render
 
 import (
+	"encoding/json"
 	"image/color"
 	"strings"
 
@@ -87,4 +88,33 @@ func IDs(ids []cveservices.CVEID) string {
 		}
 		return lipgloss.NewStyle()
 	})
+}
+
+// ErrorDetails lists the details of a CVE Services error, one line each, from either of the two
+// shapes it uses for validation errors.
+func ErrorDetails(raw json.RawMessage) []string {
+	var schema struct {
+		Errors []struct {
+			Path    string `json:"instancePath"`
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	var params []struct {
+		Param   string `json:"param"`
+		Message string `json:"msg"`
+	}
+	var out []string
+	switch {
+	case json.Unmarshal(raw, &schema) == nil && len(schema.Errors) > 0:
+		for _, e := range schema.Errors {
+			out = append(out, Faint.Render(e.Path+":")+" "+e.Message)
+		}
+	case json.Unmarshal(raw, &params) == nil:
+		for _, p := range params {
+			out = append(out, Faint.Render(p.Param+":")+" "+p.Message)
+		}
+	case len(raw) > 0:
+		out = append(out, Faint.Render(string(raw)))
+	}
+	return out
 }

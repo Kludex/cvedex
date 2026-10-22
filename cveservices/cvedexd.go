@@ -88,9 +88,9 @@ func (c *Client) Review(ctx context.Context) ([]ReviewItem, error) {
 
 // Approve publishes a record in review, upstream with the client's credentials, and returns it.
 func (c *Client) Approve(ctx context.Context, id string) (json.RawMessage, error) {
-	var out writeResult
-	err := c.Do(ctx, http.MethodPost, "/api/cvedexd/cve/"+url.PathEscape(id)+"/approve", nil, nil, &out)
-	return out.record(), err
+	var body json.RawMessage
+	err := c.Do(ctx, http.MethodPost, "/api/cvedexd/cve/"+url.PathEscape(id)+"/approve", nil, nil, &body)
+	return written(body), err
 }
 
 // RequestChanges sends a record in review back to its submitter with a note.

@@ -1,0 +1,27 @@
+{
+  "name": "cvedexd",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "format": "oxfmt",
+    "lint": "oxlint --deny-warnings",
+    "check": "oxlint --deny-warnings && oxfmt --check && tsc --noEmit",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "hono": "4.13.13"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.5",
+    "@cloudflare/workers-types": "5.20261019.1",
+    "@vitest/coverage-istanbul": "5.0.5",
+    "oxfmt": "0.74.0",
+    "oxlint": "1.89.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5",
+    "wrangler": "4.151.2"
+  }
+}

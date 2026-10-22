@@ -1,0 +1,36 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+      - run: zig build test
+      - name: Cross-compile
+        run: |
+          mkdir dist
+          for target in x86_64-linux-musl aarch64-linux-musl x86_64-macos aarch64-macos x86_64-windows; do
+            # Baseline CPU so the binary runs on any machine of that architecture.
+            zig build -Doptimize=ReleaseSafe -Dtarget="$target" -Dcpu=baseline --prefix "out/$target"
+            name="cvedex-${GITHUB_REF_NAME}-${target}"
+            if [[ "$target" == *windows ]]; then
+              (cd "out/$target/bin" && zip -q "../../../dist/$name.zip" cvedex.exe)
+            else
+              tar -C "out/$target/bin" -czf "dist/$name.tar.gz" cvedex
+            fi
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/*
+          generate_release_notes: true

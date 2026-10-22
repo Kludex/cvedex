@@ -1,0 +1,16 @@
+name = "cvedexd"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Secrets, set with `wrangler secret put`:
+#   CVE_API_ORG, CVE_API_USER, CVE_API_KEY: the service account that reserves IDs for submitters.
+
+[vars]
+CVE_API_URL = "https://cveawg.mitre.org"
+VERSION = "0.1.0"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cvedexd"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

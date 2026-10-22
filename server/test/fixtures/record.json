@@ -1,0 +1,15 @@
+{
+  "containers": {
+    "cna": {
+      "affected": [
+        {
+          "vendor": "acme",
+          "product": "widget",
+          "versions": [{ "version": "1.0", "status": "affected" }]
+        }
+      ],
+      "descriptions": [{ "lang": "en", "value": "Widget overflows on long input." }],
+      "references": [{ "url": "https://acme.test/advisory/1" }]
+    }
+  }
+}

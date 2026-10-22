@@ -1,0 +1,8 @@
+{
+  "message": "CVE-2026-0001 record was successfully created.",
+  "created": {
+    "dataType": "CVE_RECORD",
+    "dataVersion": "5.1",
+    "cveMetadata": { "cveId": "CVE-2026-0001", "state": "PUBLISHED", "assignerShortName": "acme" }
+  }
+}

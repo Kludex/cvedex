@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/cve/CVE-2026-1100/cna",
+    "body": "{\"cnaContainer\":{\"providerMetadata\":{\"orgId\":\"6f1e6c5e-2b1f-4a8a-9d3e-0c5f8f1a2b3c\"},\"descriptions\":[{\"lang\":\"en\",\"value\":\"cvedex fixture recording. Not a real vulnerability.\"}],\"affected\":[{\"vendor\":\"cvedex\",\"product\":\"fixture\",\"versions\":[{\"version\":\"0\",\"status\":\"affected\"}]}],\"references\":[{\"url\":\"https://github.com/Kludex/cvedex\"}]}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"message\":\"CVE-2026-1100 record was successfully created. This submission should appear on https://test.cve.org/ within 15 minutes.\",\"created\":{\"dataType\":\"CVE_RECORD\",\"dataVersion\":\"5.2\",\"cveMetadata\":{\"cveId\":\"CVE-2026-1100\",\"assignerOrgId\":\"6f1e6c5e-2b1f-4a8a-9d3e-0c5f8f1a2b3c\",\"state\":\"PUBLISHED\",\"assignerShortName\":\"acme\",\"dateReserved\":\"2026-10-22T20:57:46.961Z\",\"datePublished\":\"2026-10-22T20:57:47.519Z\",\"dateUpdated\":\"2026-10-22T20:57:47.519Z\"},\"containers\":{\"cna\":{\"providerMetadata\":{\"orgId\":\"6f1e6c5e-2b1f-4a8a-9d3e-0c5f8f1a2b3c\",\"shortName\":\"acme\",\"dateUpdated\":\"2026-10-22T20:57:47.519Z\"},\"descriptions\":[{\"lang\":\"en\",\"value\":\"cvedex fixture recording. Not a real vulnerability.\"}],\"affected\":[{\"vendor\":\"cvedex\",\"product\":\"fixture\",\"versions\":[{\"version\":\"0\",\"status\":\"affected\"}]}],\"references\":[{\"url\":\"https://github.com/Kludex/cvedex\"}]}}},\"valid\":true,\"warnings\":[]}"
+  }
+}

@@ -200,14 +200,14 @@ test "the ID list opens the record under the cursor" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     var model: Model = .{};
-    var body = @embedFile("testdata/list.json").*;
-    try model.show(arena.allocator(), .ids, .{ .status = .ok, .body = &body });
+    const recorded: cvedex.Upstream.Exchange = try .cassette(arena.allocator(), @embedFile("testdata/recorded/cve-id-list.json"));
+    try model.show(arena.allocator(), .ids, .{ .status = .ok, .body = try arena.allocator().dupe(u8, recorded.body) });
     try std.testing.expectEqual(2, model.lines.len);
     try std.testing.expectEqual(Action.none, model.update(.{ .codepoint = 'j' }));
     try std.testing.expectEqual(Action.none, model.update(.{ .codepoint = 'j' }));
     try std.testing.expectEqual(1, model.cursor);
     const action = model.update(.{ .codepoint = vaxis.Key.enter });
-    try std.testing.expectEqualStrings("CVE-2024-1234", action.open);
+    try std.testing.expectEqualStrings("CVE-2026-1100", action.open);
 }
 
 test "cvedexd views are only reachable against cvedexd" {

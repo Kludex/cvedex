@@ -1,7 +1,10 @@
 import { exports } from "cloudflare:workers";
 import { afterEach, vi } from "vitest";
-import reserveFixture from "./fixtures/reserve.json";
-import userFixture from "./fixtures/user.json";
+import badRequestCassette from "../../src/testdata/recorded/bad-request.json";
+import cveIdListCassette from "../../src/testdata/recorded/cve-id-list.json";
+import publishCassette from "../../src/testdata/recorded/publish.json";
+import reserveCassette from "../../src/testdata/recorded/reserve.json";
+import userCassette from "../../src/testdata/recorded/user.json";
 
 export type Upstream = {
   method: string;
@@ -20,6 +23,15 @@ export type Cassette = {
 export function cassette({ request, response }: Cassette): Upstream & { body: string } {
   return { ...request, ...response };
 }
+
+type CveIdList = { cve_ids: { cve_id: string }[] };
+
+export const record: unknown = JSON.parse(publishCassette.request.body);
+export const publish: unknown = JSON.parse(publishCassette.response.body);
+export const badRequest: unknown = JSON.parse(badRequestCassette.response.body);
+export const cveIdList: CveIdList = JSON.parse(cveIdListCassette.response.body);
+const reservation: CveIdList = JSON.parse(reserveCassette.response.body);
+
 export type Call = { method: string; path: string; headers: Headers; body: string };
 
 afterEach(() => {
@@ -56,11 +68,7 @@ export const alice = {
   "CVE-API-KEY": "alice-key",
 };
 
-export const aliceCheck: Upstream = {
-  method: "GET",
-  path: "/api/org/acme/user/alice%40acme.test",
-  body: userFixture,
-};
+export const aliceCheck: Upstream = cassette(userCassette);
 
 export function api(
   path: string,
@@ -92,8 +100,8 @@ export function cveIdFor(n: number): string {
 
 export function reserved(cveId: string) {
   return {
-    ...reserveFixture,
-    cve_ids: reserveFixture.cve_ids.map((entry) => ({ ...entry, cve_id: cveId })),
+    ...reservation,
+    cve_ids: reservation.cve_ids.map((entry) => ({ ...entry, cve_id: cveId })),
   };
 }
 

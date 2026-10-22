@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/cve-id?amount=1&cve_year=2026&short_name=acme"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"cve_ids\":[{\"requested_by\":{\"cna\":\"acme\",\"user\":\"alice@acme.test\"},\"cve_id\":\"CVE-2026-1100\",\"cve_year\":\"2026\",\"state\":\"RESERVED\",\"owning_cna\":\"acme\",\"reserved\":\"2026-10-22T20:57:46.961Z\"}],\"meta\":{\"remaining_quota\":999}}"
+  }
+}

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import badRequest from "./fixtures/bad-request.json";
-import publish from "./fixtures/publish.json";
-import record from "./fixtures/record.json";
 import {
   alice,
   aliceCheck,
   api,
+  badRequest,
   createAgent,
   createSubmitter,
   mockUpstream,
+  publish,
+  record,
   reserveAs,
   reserved,
   type Credentials,

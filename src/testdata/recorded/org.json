@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/org/acme"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"authority\":{\"active_roles\":[\"CNA\"]},\"name\":\"Acme\",\"short_name\":\"acme\",\"UUID\":\"6f1e6c5e-2b1f-4a8a-9d3e-0c5f8f1a2b3c\",\"policies\":{\"id_quota\":1000},\"time\":{\"created\":\"2026-10-22T16:28:59.746Z\",\"modified\":\"2026-10-22T16:29:00.304Z\"}}"
+  }
+}

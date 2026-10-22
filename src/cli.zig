@@ -423,27 +423,20 @@ fn runAgainst(arena: std.mem.Allocator, exchanges: []const Upstream.Exchange, ar
 test "reserve prints one line per reserved id" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
-    const r = try runAgainst(arena.allocator(), &.{.{
-        .method = .POST,
-        .target = "/api/cve-id?amount=2&cve_year=2025&short_name=acme&batch_type=nonsequential",
-        .body = @embedFile("testdata/reserve.json"),
-    }}, &.{ "reserve", "--year", "2025", "--count", "2" }, "");
+    const recorded: Upstream.Exchange = try .cassette(arena.allocator(), @embedFile("testdata/recorded/reserve.json"));
+    const r = try runAgainst(arena.allocator(), &.{recorded}, &.{ "reserve", "--year", "2026", "--count", "1" }, "");
     try std.testing.expectEqual(0, r.code);
-    try std.testing.expectEqualStrings(
-        "CVE-2025-0001\tRESERVED\t2025-01-02T10:00:00.000Z\nCVE-2025-0002\tRESERVED\t2025-01-02T10:00:00.000Z\n",
-        r.stdout,
-    );
+    try std.testing.expectEqualStrings("CVE-2026-1100\tRESERVED\t2026-10-22T20:57:46.961Z\n", r.stdout);
 }
 
-test "list --json prints the body verbatim" {
+test "list --json prints the body verbatim, newline-terminated" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
-    const body = @embedFile("testdata/list.json");
-    const r = try runAgainst(arena.allocator(), &.{
-        .{ .method = .GET, .target = "/api/cve-id?state=PUBLISHED", .body = body },
-    }, &.{ "list", "--state", "PUBLISHED", "--json" }, "");
+    var recorded: Upstream.Exchange = try .cassette(arena.allocator(), @embedFile("testdata/recorded/cve-id-list.json"));
+    recorded.target = "/api/cve-id?state=PUBLISHED";
+    const r = try runAgainst(arena.allocator(), &.{recorded}, &.{ "list", "--state", "PUBLISHED", "--json" }, "");
     try std.testing.expectEqual(0, r.code);
-    try std.testing.expectEqualStrings(body, r.stdout);
+    try std.testing.expectEqualStrings(try std.mem.concat(arena.allocator(), u8, &.{ recorded.body, "\n" }), r.stdout);
 }
 
 test "an upstream error goes to stderr with exit code 1" {

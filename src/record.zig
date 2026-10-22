@@ -51,8 +51,11 @@ test "cnaPayload rejects a non-object" {
 test "parseIds reads ids and states" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
-    const ids = try parseIds(arena.allocator(), @embedFile("testdata/list.json"));
+    const recorded: Upstream.Exchange = try .cassette(arena.allocator(), @embedFile("testdata/recorded/cve-id-list.json"));
+    const ids = try parseIds(arena.allocator(), recorded.body);
     try std.testing.expectEqual(2, ids.cve_ids.len);
-    try std.testing.expectEqualStrings("CVE-2024-1234", ids.cve_ids[1].cve_id);
+    try std.testing.expectEqualStrings("CVE-2026-1100", ids.cve_ids[1].cve_id);
     try std.testing.expectEqualStrings("PUBLISHED", ids.cve_ids[1].state);
 }
+
+const Upstream = @import("Upstream.zig");

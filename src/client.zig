@@ -159,12 +159,12 @@ const Upstream = @import("Upstream.zig");
 test "reserve sends org, year, amount and auth headers" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
-    var upstream: Upstream = try .start(io, &.{.{
-        .method = .POST,
-        .target = "/api/cve-id?amount=2&cve_year=2025&short_name=acme&batch_type=sequential",
-        .expect_user = "ada@acme.org",
-        .body = @embedFile("testdata/reserve.json"),
-    }});
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    var recorded: Upstream.Exchange = try .cassette(arena.allocator(), @embedFile("testdata/recorded/reserve.json"));
+    recorded.target = "/api/cve-id?amount=2&cve_year=2025&short_name=acme&batch_type=sequential";
+    recorded.expect_user = "ada@acme.org";
+    var upstream: Upstream = try .start(io, &.{recorded});
     defer upstream.deinit(io);
     var buf: [64]u8 = undefined;
     var client: Client = .init(gpa, io, .{ .url = upstream.url(&buf), .org = "acme", .user = "ada@acme.org", .key = "k" });
@@ -175,7 +175,7 @@ test "reserve sends org, year, amount and auth headers" {
     try upstream.finish(io);
 
     try std.testing.expectEqual(std.http.Status.ok, response.status);
-    try std.testing.expectEqualStrings(@embedFile("testdata/reserve.json"), response.body);
+    try std.testing.expectEqualStrings(recorded.body, response.body);
 }
 
 test "error responses are returned verbatim" {

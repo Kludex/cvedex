@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/cve/CVE-2026-1100/cna",
+    "body": "{\"cnaContainer\":{}}"
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "cache-control": "no-store",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"error\":\"INVALID_JSON_SCHEMA\",\"message\":\"CVE cnaContainer JSON schema validation FAILED.\",\"details\":{\"errors\":[{\"instancePath\":\"/cnaContainer\",\"schemaPath\":\"#/properties/cnaContainer/required\",\"keyword\":\"required\",\"params\":{\"missingProperty\":\"descriptions\"},\"message\":\"must have required property 'descriptions'\"}]},\"valid\":false,\"warnings\":[]}"
+  }
+}

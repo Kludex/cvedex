@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
-import badRequest from "./fixtures/bad-request.json";
-import cveIdList from "./fixtures/cve-id-list.json";
 import published from "../../src/testdata/recorded/cve-2025-0001.json";
 import recordDne from "../../src/testdata/recorded/cve-record-dne.json";
-import publish from "./fixtures/publish.json";
-import record from "./fixtures/record.json";
 import {
   alice,
   aliceCheck,
   api,
+  badRequest,
   cassette,
   createSubmitter,
   cveIdFor,
+  cveIdList,
   mockUpstream,
+  publish,
+  record,
   reserveAs,
   reserved,
 } from "./helpers";

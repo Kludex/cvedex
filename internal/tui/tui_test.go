@@ -229,9 +229,15 @@ func TestCvedexdSubmitter(t *testing.T) {
 		cassette.Exchange{Method: "GET", Path: "/api/cvedexd/review", Status: 403,
 			Response: `{"error":"NOT_ALLOWED","message":"Only CNA users can do this"}`},
 		cassette.Exchange{Method: "GET", Path: "/api/cvedexd/proposals", Response: `{"proposals":[]}`},
-		cassette.Exchange{Method: "GET", Path: "/api/cve-id", Response: `{"cve_ids":[]}`},
+		cassette.Exchange{Method: "GET", Path: "/api/cve-id",
+			Response: `{"cve_ids":[{"cve_id":"CVE-2026-1102","state":"RESERVED",` +
+				`"cvedexd":{"state":"reserved","note":"Add a CWE."}},` +
+				`{"cve_id":"CVE-2026-1103","state":"RESERVED","cvedexd":{"state":"in_review"}}]}`},
 	)
-	s.shows("1 CVE IDs", "2 Proposals", "tab switch")
+	s.shows("1 CVE IDs", "2 Proposals", "tab switch", "RESERVED changes requested",
+		"Changes requested: Add a CWE.")
+	s.press("down")
+	s.hides("Changes requested:")
 	s.hides("Review")
 	s.hides("Audit")
 }

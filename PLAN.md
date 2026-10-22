@@ -112,6 +112,8 @@ reserved -> in_review -> published
      +----------+  (changes_requested, note stored)
 ```
 
+A reviewer's note sends the record back to `reserved`. The client shows that ID as "changes requested", with the note, until the submitter sends it again.
+
 ### Endpoints
 
 CVE Services-compatible, forwarded or reinterpreted:
@@ -148,7 +150,7 @@ A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|sub
 
 ### Tables
 
-`submitters`, `tokens`, `cves`, `proposals`, `audit`. One `schema.sql`, applied with `wrangler d1 migrations`.
+`submitters`, `tokens`, `cves`, `proposals`, `audit`. Schema changes are numbered files in `server/migrations/`, applied with `wrangler d1 migrations apply`.
 
 ## Dependencies
 

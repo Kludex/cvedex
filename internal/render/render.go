@@ -79,15 +79,25 @@ func IDs(ids []cveservices.CVEID) string {
 	for i, id := range ids {
 		rows[i] = []string{id.ID, id.State, id.Reserved.Format("2006-01-02"), id.RequestedBy.User}
 		if id.Cvedexd != nil {
-			rows[i][1] += " (" + id.Cvedexd.State + ")"
+			rows[i][1] += " (" + id.Cvedexd.Label() + ")"
 		}
 	}
-	return Table([]string{"CVE ID", "STATE", "RESERVED", "BY"}, rows, func(row, col int) lipgloss.Style {
+	out := Table([]string{"CVE ID", "STATE", "RESERVED", "BY"}, rows, func(row, col int) lipgloss.Style {
 		if col == 1 {
 			return lipgloss.NewStyle().Foreground(StateColor(ids[row].State))
 		}
 		return lipgloss.NewStyle()
 	})
+	var notes []string
+	for _, id := range ids {
+		if id.Cvedexd.ChangesRequested() {
+			notes = append(notes, Warn.Render(id.ID+":")+" "+id.Cvedexd.Note)
+		}
+	}
+	if notes != nil {
+		out += "\n\n" + Bold.Render("Changes requested") + "\n" + strings.Join(notes, "\n")
+	}
+	return out
 }
 
 // ErrorDetails lists the details of a CVE Services error, one line each, from either of the two

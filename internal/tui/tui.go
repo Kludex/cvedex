@@ -313,6 +313,11 @@ func (m Model) enter() tea.Cmd {
 	return nil
 }
 
+func (m Model) cursorID() cveservices.CVEID {
+	id, _ := pick(m.ids, m.table.Cursor(), true)
+	return id
+}
+
 func (m *Model) ask(question string, answer tea.Cmd) {
 	m.question, m.answer = question, answer
 }
@@ -349,7 +354,7 @@ func (m *Model) show(data any) {
 		for _, id := range data {
 			state := render.State(id.State)
 			if id.Cvedexd != nil {
-				state += render.Faint.Render(" " + id.Cvedexd.State)
+				state += render.Faint.Render(" " + id.Cvedexd.Label())
 			}
 			rows = append(rows, table.Row{id.ID, state, id.Reserved.Format("2006-01-02"), id.RequestedBy.User})
 		}
@@ -395,7 +400,7 @@ func (m *Model) open(id string, record json.RawMessage) {
 var columns = map[tab][]table.Column{
 	tabIDs: {
 		{Title: "CVE ID", Width: 16},
-		{Title: "STATE", Width: 20},
+		{Title: "STATE", Width: 27},
 		{Title: "RESERVED", Width: 12},
 		{Title: "BY"},
 	},
@@ -491,6 +496,8 @@ func (m Model) View() tea.View {
 		status[0] = m.spinner.View() + render.Faint.Render(" Loading")
 	case m.flash != "":
 		status[0] = render.Good.Render(m.flash)
+	case m.reading == "" && m.tab == tabIDs && m.cursorID().Cvedexd.ChangesRequested():
+		status[0] = render.Warn.Render("Changes requested: ") + m.cursorID().Cvedexd.Note
 	case m.reading == "" && len(m.table.Rows()) == 0:
 		status[0] = render.Faint.Render("Nothing here yet.")
 	}

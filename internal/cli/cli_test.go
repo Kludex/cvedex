@@ -105,6 +105,16 @@ func TestCommands(t *testing.T) {
 			stdout: []string{"cvedexd 0.1.0", "alice@acme.test  submitter"},
 		},
 		{
+			name: "list with a reviewer's note",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/api/cve-id",
+				Response: `{"cve_ids":[{"cve_id":"CVE-2026-1102","state":"RESERVED",` +
+					`"cvedexd":{"state":"reserved","note":"Add a CWE."}},` +
+					`{"cve_id":"CVE-2026-1103","state":"RESERVED","cvedexd":{"state":"in_review"}}]}`}},
+			args: []string{"list"},
+			stdout: []string{"RESERVED (changes requested)", "RESERVED (in_review)", "Changes requested",
+				"CVE-2026-1102: Add a CWE."},
+		},
+		{
 			name:      "list",
 			exchanges: []cassette.Exchange{cassette.Load(t, "cve-id-list")},
 			args:      []string{"ls"},

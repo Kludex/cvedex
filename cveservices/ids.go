@@ -40,6 +40,19 @@ type LocalState struct {
 	Note  string `json:"note,omitempty"`
 }
 
+// ChangesRequested reports whether a reviewer sent the record back, with Note saying why.
+func (s *LocalState) ChangesRequested() bool {
+	return s != nil && s.State == "reserved" && s.Note != ""
+}
+
+// Label is the state as people read it.
+func (s *LocalState) Label() string {
+	if s.ChangesRequested() {
+		return "changes requested"
+	}
+	return s.State
+}
+
 // ReserveOptions says how many IDs to reserve and for which year.
 type ReserveOptions struct {
 	Year  int

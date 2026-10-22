@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -174,17 +175,25 @@ func (a *app) statusCommand() *cobra.Command {
 				Version string            `json:"version,omitempty"`
 				User    *cveservices.User `json:"user,omitempty"`
 				Org     *cveservices.Org  `json:"org,omitempty"`
+				// Submitter is set for a cvedexd submitter, who has no CVE Services account.
+				Submitter string `json:"submitter,omitempty"`
 			}
 			s := status{URL: creds.URL, Server: "CVE Services", Version: health.Version}
 			if health.IsCvedexd() {
 				s.Server = "cvedexd"
 			}
 			if creds.Org != "" && creds.User != "" && creds.Key != "" {
-				if s.User, err = a.client.User(cmd.Context(), creds.User); err != nil {
+				s.User, err = a.client.User(cmd.Context(), creds.User)
+				var apiErr *cveservices.Error
+				switch {
+				case health.IsCvedexd() && errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden:
+					s.User, s.Submitter = nil, creds.User
+				case err != nil:
 					return err
-				}
-				if s.Org, err = a.client.Org(cmd.Context()); err != nil {
-					return err
+				default:
+					if s.Org, err = a.client.Org(cmd.Context()); err != nil {
+						return err
+					}
 				}
 			}
 			return a.output(s, func() string {
@@ -194,6 +203,10 @@ func (a *app) statusCommand() *cobra.Command {
 				}
 				lines := []string{render.Label.Render("Server") + render.Good.Render("● ") + creds.URL +
 					render.Faint.Render("  "+server)}
+				if s.Submitter != "" {
+					user := render.Bold.Render(s.Submitter) + render.Faint.Render("  submitter")
+					return strings.Join(append(lines, render.Label.Render("User")+user), "\n")
+				}
 				if s.User == nil {
 					user := render.Warn.Render("not logged in") + hint(", run ", "cvedex login")
 					return strings.Join(append(lines, render.Label.Render("User")+user), "\n")

@@ -98,6 +98,13 @@ func TestCommands(t *testing.T) {
 			stdout: []string{`"server": "CVE Services"`, `"username": "alice@acme.test"`, `"short_name": "acme"`},
 		},
 		{
+			name: "status as a cvedexd submitter",
+			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: cassette.Load(t, "user").Path, Status: 403,
+				Response: `{"error":"NOT_ALLOWED","message":"Submitters can only reserve IDs and submit records"}`}),
+			args:   []string{"status"},
+			stdout: []string{"cvedexd 0.1.0", "alice@acme.test  submitter"},
+		},
+		{
 			name:      "list",
 			exchanges: []cassette.Exchange{cassette.Load(t, "cve-id-list")},
 			args:      []string{"ls"},

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +99,7 @@ type (
 		data any
 		err  error
 	}
+	tabsMsg   []tab
 	recordMsg struct {
 		id     string
 		record json.RawMessage
@@ -131,9 +133,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	case healthMsg:
-		if msg.health.IsCvedexd() {
-			m.tabs = []tab{tabIDs, tabReview, tabProposals, tabAudit}
+		if !msg.health.IsCvedexd() {
+			return m, m.load(tabIDs)
 		}
+		return m, m.allowedTabs
+	case tabsMsg:
+		m.tabs = msg
 		return m, m.load(tabIDs)
 	case loadedMsg:
 		m.loading = false
@@ -177,6 +182,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.key(msg)
 	}
 	return m, nil
+}
+
+// allowedTabs finds the cvedexd tabs open to the caller: CNA users review and read the audit log,
+// submitters approve their agents' proposals.
+func (m Model) allowedTabs() tea.Msg {
+	tabs := []tab{tabIDs}
+	_, err := m.client.Review(m.ctx)
+	reviewer := !forbidden(err)
+	if reviewer {
+		tabs = append(tabs, tabReview)
+	}
+	if _, err := m.client.Proposals(m.ctx); !forbidden(err) {
+		tabs = append(tabs, tabProposals)
+	}
+	if reviewer {
+		tabs = append(tabs, tabAudit)
+	}
+	return tabsMsg(tabs)
+}
+
+func forbidden(err error) bool {
+	var apiErr *cveservices.Error
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden
 }
 
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

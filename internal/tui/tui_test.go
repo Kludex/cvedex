@@ -168,6 +168,8 @@ func TestCvedexd(t *testing.T) {
 	s := start(
 		t,
 		health,
+		review,
+		proposals,
 		cassette.Exchange{
 			Method: "GET",
 			Path:   "/api/cve-id",
@@ -219,6 +221,19 @@ func TestCvedexd(t *testing.T) {
 	s.shows("2026-10-22 10:00:00", "agent", "401")
 	s.press("down", "shift+tab")
 	s.shows("Proposals")
+}
+
+func TestCvedexdSubmitter(t *testing.T) {
+	s := start(t,
+		cassette.Exchange{Method: "GET", Path: "/api/health-check", Response: `{"server":"cvedexd","version":"0.1.0"}`},
+		cassette.Exchange{Method: "GET", Path: "/api/cvedexd/review", Status: 403,
+			Response: `{"error":"NOT_ALLOWED","message":"Only CNA users can do this"}`},
+		cassette.Exchange{Method: "GET", Path: "/api/cvedexd/proposals", Response: `{"proposals":[]}`},
+		cassette.Exchange{Method: "GET", Path: "/api/cve-id", Response: `{"cve_ids":[]}`},
+	)
+	s.shows("1 CVE IDs", "2 Proposals", "tab switch")
+	s.hides("Review")
+	s.hides("Audit")
 }
 
 // TestMain lets the test binary act as $EDITOR: it saves the path and content it was given to

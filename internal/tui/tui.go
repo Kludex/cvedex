@@ -209,6 +209,9 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.flash, m.err = "", nil
 	switch k {
 	case "tab", "shift+tab":
+		if len(m.tabs) == 1 {
+			return m, nil
+		}
 		step := 1
 		if k == "shift+tab" {
 			step = len(m.tabs) - 1
@@ -425,7 +428,10 @@ func (m Model) position() int {
 func (m Model) View() tea.View {
 	var tabs []string
 	for i, t := range m.tabs {
-		name := fmt.Sprintf("%d %s", i+1, tabNames[t])
+		name := tabNames[t]
+		if len(m.tabs) > 1 {
+			name = fmt.Sprintf("%d %s", i+1, name)
+		}
 		if t == m.tab {
 			tabs = append(tabs, render.Bold.Reverse(true).Padding(0, 1).Render(name))
 		} else {
@@ -462,7 +468,7 @@ func (m Model) View() tea.View {
 	}
 
 	height := max(m.height-4-(len(status)-1), 3)
-	hints := "↑↓ move · enter open · tab switch · r refresh · q quit"
+	hints := "↑↓ move · enter open · r refresh · q quit"
 	var body string
 	switch {
 	case m.reading != "":
@@ -474,11 +480,11 @@ func (m Model) View() tea.View {
 			hints = "↑↓ scroll · e edit · esc back · q quit"
 		}
 	case m.tab == tabIDs:
-		hints = "↑↓ move · enter open · e edit · n new ID · tab switch · r refresh · q quit"
+		hints = "↑↓ move · enter open · e edit · n new ID · r refresh · q quit"
 	case m.tab == tabReview:
-		hints = "↑↓ move · enter read · a approve · tab switch · r refresh · q quit"
+		hints = "↑↓ move · enter read · a approve · r refresh · q quit"
 	case m.tab == tabProposals:
-		hints = "↑↓ move · a approve · d deny · tab switch · r refresh · q quit"
+		hints = "↑↓ move · a approve · d deny · r refresh · q quit"
 	}
 	if body == "" {
 		table := m.table
@@ -486,6 +492,9 @@ func (m Model) View() tea.View {
 		body = table.View()
 	}
 
+	if len(m.tabs) > 1 && m.reading == "" {
+		hints = strings.Replace(hints, " · r refresh", " · tab switch · r refresh", 1)
+	}
 	lines := append([]string{header, "", body}, status...)
 	lines = append(lines, render.Faint.Render(hints))
 	for i := 3; i < len(lines); i++ {

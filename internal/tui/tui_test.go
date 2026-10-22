@@ -122,7 +122,9 @@ func TestCVEServices(t *testing.T) {
 			Response: `{"error":"UNAUTHORIZED","message":"Unauthorized"}`,
 		},
 	)
-	s.shows("1 CVE IDs", "CVE-2026-1100", "PUBLISHED", "alice@acme.test", "127.0.0.1", "n new ID")
+	s.shows("CVE IDs", "CVE-2026-1100", "PUBLISHED", "alice@acme.test", "127.0.0.1", "n new ID")
+	s.hides("1 CVE IDs")
+	s.hides("tab switch")
 	s.hides("Review")
 
 	s.press("down", "enter")
@@ -137,8 +139,8 @@ func TestCVEServices(t *testing.T) {
 	s.press("n", "y")
 	s.shows("Reserved CVE-2026-1101")
 
-	s.press("2", "a", "d", "tab")
-	s.shows("1 CVE IDs", "Unauthorized (UNAUTHORIZED)")
+	s.press("2", "a", "d", "tab", "r")
+	s.shows("CVE IDs", "Unauthorized (UNAUTHORIZED)")
 	s.send(tea.WindowSizeMsg{Width: 80, Height: 10})
 	s.shows("CVE-2026-1100")
 
@@ -195,7 +197,7 @@ func TestCvedexd(t *testing.T) {
 			`"method":"GET","path":"/api/cve-id","status":401}]}`},
 		cassette.Exchange{Method: "GET", Path: "/api/cvedexd/proposals", Response: `{"proposals":[]}`},
 	)
-	s.shows("1 CVE IDs", "2 Review", "3 Proposals", "4 Audit", "RESERVED in_review")
+	s.shows("1 CVE IDs", "2 Review", "3 Proposals", "4 Audit", "RESERVED in_review", "tab switch")
 
 	s.press("tab")
 	s.shows("CVE-2026-1100", "bob", "Path traversal in widget", "a approve")

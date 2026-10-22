@@ -1,7 +1,6 @@
 package render
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -53,7 +52,7 @@ func Record(raw json.RawMessage, width int) string {
 		b.WriteString(Bold.Render(m.ID) + "  " + State(m.State) + "\n")
 	}
 	if c.Title != "" {
-		b.WriteString(wrap(Bold, width).Render(c.Title) + "\n")
+		b.WriteString(Bold.Width(width).Render(c.Title) + "\n")
 	}
 	b.WriteString("\n")
 	field := func(label, value string) {
@@ -71,21 +70,21 @@ func Record(raw json.RawMessage, width int) string {
 		field("Weakness", cwe)
 	}
 	for _, text := range english(c.Descriptions, "value") {
-		b.WriteString("\n" + wrap(lipgloss.NewStyle(), width).Render(text) + "\n")
+		b.WriteString("\n" + lipgloss.NewStyle().Width(width).Render(text) + "\n")
 	}
 	for _, text := range english(c.RejectedReasons, "value") {
-		b.WriteString("\n" + wrap(Bad, width).Render(text) + "\n")
+		b.WriteString("\n" + Bad.Width(width).Render(text) + "\n")
 	}
 	if products := affected(c.Affected); len(products) > 0 {
 		b.WriteString("\n" + Faint.Render("Affected") + "\n")
 		for _, p := range products {
-			b.WriteString(wrap(lipgloss.NewStyle().PaddingLeft(2), width).Render(p) + "\n")
+			b.WriteString(lipgloss.NewStyle().PaddingLeft(2).Width(width).Render(p) + "\n")
 		}
 	}
 	var refs []struct {
 		URL string `json:"url"`
 	}
-	decodeMany(c.References, &refs)
+	_ = json.Unmarshal(c.References, &refs)
 	if len(refs) > 0 {
 		b.WriteString("\n" + Faint.Render("References") + "\n")
 		for _, ref := range refs {
@@ -95,13 +94,6 @@ func Record(raw json.RawMessage, width int) string {
 	return trimLines(strings.TrimRight(b.String(), "\n"))
 }
 
-func wrap(style lipgloss.Style, width int) lipgloss.Style {
-	if width <= 0 {
-		return style
-	}
-	return style.Width(width)
-}
-
 func day(timestamp string) string {
 	day, _, _ := strings.Cut(timestamp, "T")
 	return day
@@ -109,7 +101,7 @@ func day(timestamp string) string {
 
 func severity(metrics json.RawMessage) string {
 	var list []map[string]json.RawMessage
-	decodeMany(metrics, &list)
+	_ = json.Unmarshal(metrics, &list)
 	for _, metric := range list {
 		for _, key := range []string{"cvssV4_0", "cvssV3_1", "cvssV3_0", "cvssV2_0"} {
 			var cvss struct {
@@ -140,7 +132,7 @@ func weaknesses(problemTypes json.RawMessage) []string {
 	var types []struct {
 		Descriptions json.RawMessage `json:"descriptions"`
 	}
-	decodeMany(problemTypes, &types)
+	_ = json.Unmarshal(problemTypes, &types)
 	var out []string
 	for _, t := range types {
 		out = append(out, english(t.Descriptions, "description")...)
@@ -151,7 +143,7 @@ func weaknesses(problemTypes json.RawMessage) []string {
 // english returns the `key` field of each entry in English, or of every entry when none is.
 func english(raw json.RawMessage, key string) []string {
 	var entries []map[string]any
-	decodeMany(raw, &entries)
+	_ = json.Unmarshal(raw, &entries)
 	var all, en []string
 	for _, e := range entries {
 		text, _ := e[key].(string)
@@ -180,7 +172,7 @@ func affected(raw json.RawMessage) []string {
 			LessThanOrEqual string `json:"lessThanOrEqual"`
 		} `json:"versions"`
 	}
-	decodeMany(raw, &products)
+	_ = json.Unmarshal(raw, &products)
 	var out []string
 	for _, p := range products {
 		var ranges []string
@@ -204,14 +196,4 @@ func affected(raw json.RawMessage) []string {
 		out = append(out, line)
 	}
 	return out
-}
-
-// decodeMany decodes a JSON array into out, a pointer to a slice, accepting a lone object as a
-// one-element array. Anything else leaves out empty.
-func decodeMany(raw json.RawMessage, out any) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) > 0 && raw[0] == '{' {
-		raw = append(append(json.RawMessage{'['}, raw...), ']')
-	}
-	_ = json.Unmarshal(raw, out)
 }

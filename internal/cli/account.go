@@ -58,12 +58,11 @@ func (a *app) loginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path, err := config.Save(creds)
-			if err != nil {
+			if err := config.Save(a.configPath, creds); err != nil {
 				return err
 			}
 			a.print(render.Good.Render("Logged in") + " to " + creds.URL + " as " + render.Bold.Render(creds.User) +
-				" (" + creds.Org + roles(me.Authority) + ").\n" + render.Faint.Render("Saved to "+path))
+				" (" + creds.Org + roles(me.Authority) + ").\n" + render.Faint.Render("Saved to "+a.configPath))
 			return nil
 		},
 	}
@@ -117,13 +116,9 @@ func (a *app) loginForm(cmd *cobra.Command, creds *cveservices.Credentials, choo
 			creds.URL = strings.TrimSpace(custom)
 		}
 	}
-	creds.Org, creds.User, creds.Key = strings.TrimSpace(
-		creds.Org,
-	), strings.TrimSpace(
-		creds.User,
-	), strings.TrimSpace(
-		creds.Key,
-	)
+	creds.Org = strings.TrimSpace(creds.Org)
+	creds.User = strings.TrimSpace(creds.User)
+	creds.Key = strings.TrimSpace(creds.Key)
 	return nil
 }
 

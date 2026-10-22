@@ -17,7 +17,7 @@ func (a *app) tuiCommand() *cobra.Command {
 		GroupID: groupTools,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return tui.Run(cmd.Context(), a.client)
+			return tui.Run(cmd.Context(), a.client, a.stdin, a.stdout)
 		},
 	}
 }

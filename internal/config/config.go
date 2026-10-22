@@ -26,13 +26,9 @@ func Path() (string, error) {
 	return filepath.Join(home, ".config", "cvedex", "config.json"), nil
 }
 
-// Load reads the config file if there is one, then applies the environment overrides.
-func Load() (cveservices.Credentials, error) {
+// Load reads the config file at path if there is one, then applies the environment overrides.
+func Load(path string) (cveservices.Credentials, error) {
 	var creds cveservices.Credentials
-	path, err := Path()
-	if err != nil {
-		return creds, err
-	}
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -53,29 +49,18 @@ func Load() (cveservices.Credentials, error) {
 			*field = value
 		}
 	}
-	if creds.URL == "" {
-		creds.URL = cveservices.ProductionURL
-	}
 	return creds, nil
 }
 
-// Save writes creds to the config file, readable by the owner only since it holds the API key,
-// and returns its path.
-func Save(creds cveservices.Credentials) (string, error) {
-	path, err := Path()
-	if err != nil {
-		return "", err
-	}
+// Save writes creds to the config file at path, readable by the owner only since it holds the API key.
+func Save(path string, creds cveservices.Credentials) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", err
+		return err
 	}
-	data, err := json.MarshalIndent(creds, "", "  ")
-	if err != nil {
-		return "", err
-	}
+	data, _ := json.MarshalIndent(creds, "", "  ") // all strings, so it cannot fail
 	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
-		return "", err
+		return err
 	}
 	// WriteFile keeps the mode of a file that already exists.
-	return path, os.Chmod(path, 0o600)
+	return os.Chmod(path, 0o600)
 }

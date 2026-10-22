@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,8 +25,8 @@ import (
 )
 
 // Run shows the interface until the user quits.
-func Run(ctx context.Context, client *cveservices.Client) error {
-	_, err := tea.NewProgram(New(ctx, client), tea.WithContext(ctx)).Run()
+func Run(ctx context.Context, client *cveservices.Client, in io.Reader, out io.Writer) error {
+	_, err := tea.NewProgram(New(ctx, client), tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out)).Run()
 	return err
 }
 
@@ -244,7 +246,7 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if k == "shift+tab" {
 			step = len(m.tabs) - 1
 		}
-		return m, m.load(m.tabs[(m.position()+step)%len(m.tabs)])
+		return m, m.load(m.tabs[(slices.Index(m.tabs, m.tab)+step)%len(m.tabs)])
 	case "1", "2", "3", "4":
 		if i := int(k[0] - '1'); i < len(m.tabs) {
 			return m, m.load(m.tabs[i])
@@ -446,15 +448,6 @@ func (m Model) current() any {
 		return m.proposals
 	}
 	return m.audit
-}
-
-func (m Model) position() int {
-	for i, t := range m.tabs {
-		if t == m.tab {
-			return i
-		}
-	}
-	return 0
 }
 
 // View draws the interface.

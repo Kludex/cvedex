@@ -42,6 +42,7 @@ type app struct {
 	stdout, stderr io.Writer
 	json           bool
 	url            string
+	configPath     string
 	client         *cveservices.Client
 }
 
@@ -96,17 +97,21 @@ func (a *app) root() *cobra.Command {
 const annotationNoAuth = "noAuth"
 
 func (a *app) connect(cmd *cobra.Command, _ []string) error {
-	creds, err := config.Load()
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+	creds, err := config.Load(path)
 	if err != nil {
 		return err
 	}
 	if a.url != "" {
 		creds.URL = a.url
 	}
-	if _, err := url.ParseRequestURI(creds.URL); err != nil {
+	a.configPath, a.client = path, cveservices.New(creds)
+	if _, err := url.ParseRequestURI(a.client.Credentials.URL); err != nil {
 		return fmt.Errorf("invalid URL %q", creds.URL)
 	}
-	a.client = cveservices.New(creds)
 	needsAuth := true
 	for c := cmd; c != nil; c = c.Parent() {
 		needsAuth = needsAuth && c.Annotations[annotationNoAuth] == ""
@@ -147,7 +152,7 @@ func (a *app) interactive() bool {
 
 func (a *app) width() int {
 	if f, ok := a.stdout.(*os.File); ok {
-		if w, _, err := term.GetSize(f.Fd()); err == nil {
+		if w, _, err := term.GetSize(f.Fd()); err == nil && w > 0 {
 			return min(w, 100)
 		}
 	}

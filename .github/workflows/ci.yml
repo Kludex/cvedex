@@ -23,7 +23,17 @@ jobs:
         uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
         with:
           version: v2.10.1
-      - run: go test -race ./...
+      - if: runner.os != 'Linux'
+        run: go test -race ./...
+      # Coverage is enforced on Linux, which has the pseudo-terminals the prompt tests need. cmd/ is
+      # left out: main only wires signals to cli.Main, which the tests drive directly.
+      - if: runner.os == 'Linux'
+        run: |
+          go test -race -coverpkg=./cveservices/...,./internal/... -coverprofile=cover.out ./...
+          go tool cover -func=cover.out | tail -1 | grep -q '100.0%' || {
+            go tool cover -func=cover.out | grep -v '100.0%'
+            exit 1
+          }
 
   server:
     runs-on: ubuntu-latest

@@ -144,10 +144,7 @@ func (a *app) rejectCommand() *cobra.Command {
 				return errors.New("--reason is required")
 			}
 			reasons := []map[string]string{{"lang": "en", "value": reason}}
-			cna, err := json.Marshal(map[string]any{"rejectedReasons": reasons})
-			if err != nil {
-				return err
-			}
+			cna, _ := json.Marshal(map[string]any{"rejectedReasons": reasons}) // strings always marshal
 			return a.write(cmd, "reject", cveID(args[0]), cna, yes, a.reject)
 		},
 	}

@@ -59,10 +59,7 @@ func New(client *cveservices.Client, version string) *mcp.Server {
 	type sender func(context.Context, string, json.RawMessage) (json.RawMessage, error)
 	write := func(send sender) mcp.ToolHandlerFor[recordInput, any] {
 		return func(ctx context.Context, _ *mcp.CallToolRequest, in recordInput) (*mcp.CallToolResult, any, error) {
-			cna, err := json.Marshal(in.CNAContainer)
-			if err != nil {
-				return nil, nil, err
-			}
+			cna, _ := json.Marshal(in.CNAContainer) // decoded from JSON, so it cannot fail
 			return result(send(ctx, in.CVEID, cna))
 		}
 	}

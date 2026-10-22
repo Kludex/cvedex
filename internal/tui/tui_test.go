@@ -212,6 +212,8 @@ func TestCvedexd(t *testing.T) {
 
 	s.press("tab")
 	s.shows("p1", "POST /api/cve-id?amount=1", "d deny")
+	s.press("enter")
+	s.shows("p1")
 	s.press("a", "y")
 	s.shows("CVE Services is down (UPSTREAM)")
 	s.press("d", "y")
@@ -243,7 +245,8 @@ func TestCvedexdSubmitter(t *testing.T) {
 }
 
 // TestMain lets the test binary act as $EDITOR: it saves the path and content it was given to
-// $CVEDEX_TEST_EDITOR_SAW, then writes $CVEDEX_TEST_EDITOR over the file unless it is empty.
+// $CVEDEX_TEST_EDITOR_SAW, then writes $CVEDEX_TEST_EDITOR over the file unless it is empty, or
+// deletes the file if it is "<delete>".
 func TestMain(m *testing.M) {
 	content, ok := os.LookupEnv("CVEDEX_TEST_EDITOR")
 	if !ok {
@@ -254,7 +257,11 @@ func TestMain(m *testing.M) {
 	if err == nil {
 		err = os.WriteFile(os.Getenv("CVEDEX_TEST_EDITOR_SAW"), []byte(path+"\n"+string(original)), 0o600)
 	}
-	if err == nil && content != "" {
+	switch {
+	case err != nil:
+	case content == "<delete>":
+		err = os.Remove(path)
+	case content != "":
 		err = os.WriteFile(path, []byte(content), 0o600)
 	}
 	if err != nil {
@@ -410,4 +417,64 @@ func TestEditPublishedRecord(t *testing.T) {
 	pr.waitFor("Update CVE-2026-1099? It will be public. y/n")
 	pr.press("y", 'y')
 	pr.waitFor("Sent for review: CVE-2026-1099", "n new ID")
+}
+
+func TestErrorDetails(t *testing.T) {
+	record := cassette.Load(t, "cve-2025-0001")
+	record.Path = "/api/cve/CVE-2026-1099"
+	var details []string
+	for i := range 7 {
+		details = append(details, fmt.Sprintf(`{"instancePath":"/field%d","message":"is wrong"}`, i))
+	}
+	s := start(t,
+		cassette.Load(t, "health-check"),
+		cassette.Load(t, "cve-id-list"),
+		cassette.Exchange{Method: "POST",
+			Path:   fmt.Sprintf("/api/cve-id?amount=1&cve_year=%d&short_name=acme", time.Now().Year()),
+			Status: 400, Response: `{"error":"BAD_INPUT","message":"Bad input","details":{"errors":[` +
+				strings.Join(details, ",") + `]}}`},
+		record,
+	)
+	s.press("n", "y")
+	s.shows("Bad input (BAD_INPUT)", "/field0: is wrong", "/field4: is wrong", "and 2 more")
+	s.hides("/field5")
+
+	s.press("enter", "down")
+	s.shows("References", "esc back")
+}
+
+func TestEditFailures(t *testing.T) {
+	record := func(response string) cassette.Exchange {
+		return cassette.Exchange{Method: "GET", Path: "/api/cve/CVE-2026-1099", Response: response}
+	}
+	down := record(`{"error":"DOWN","message":"Out of service"}`)
+	down.Status = 500
+	local := record(`{"cnaContainer":{"title":"Local draft"}}`)
+	pr := runProgram(t, cassette.Load(t, "health-check"), cassette.Load(t, "cve-id-list"),
+		down, record(`[]`), record(`{"containers":{"cna":[]}}`), local, local)
+
+	pr.waitFor("CVE-2026-1099")
+	pr.edit("")
+	pr.waitFor("Out of service (DOWN)")
+	pr.edit("")
+	pr.waitFor("cannot unmarshal array into Go value of type struct")
+	pr.edit("")
+	pr.waitFor("cannot unmarshal array into Go value of type map")
+
+	missing := filepath.Join(t.TempDir(), "missing")
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, missing)
+	}
+	pr.edit("")
+	pr.waitFor("CVE-2026-1099-")
+	tmp := t.TempDir()
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, tmp)
+	}
+
+	pr.edit("<delete>")
+	pr.waitFor(filepath.Join(tmp, "CVE-2026-1099-"))
+	if _, opened := pr.sawEditing(); !strings.Contains(opened, `"title": "Local draft"`) {
+		t.Errorf("container: %s", opened)
+	}
 }

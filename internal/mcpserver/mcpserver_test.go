@@ -3,6 +3,8 @@ package mcpserver_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -16,10 +18,13 @@ import (
 
 func connect(t *testing.T, exchanges ...cassette.Exchange) *mcp.ClientSession {
 	t.Helper()
+	return connectTo(t, cassette.Serve(t, exchanges...))
+}
+
+func connectTo(t *testing.T, url string) *mcp.ClientSession {
+	t.Helper()
 	ctx := context.Background()
-	client := cveservices.New(
-		cveservices.Credentials{URL: cassette.Serve(t, exchanges...), Org: "acme", User: "alice@acme.test", Key: "key"},
-	)
+	client := cveservices.New(cveservices.Credentials{URL: url, Org: "acme", User: "alice@acme.test", Key: "key"})
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	if _, err := mcpserver.New(client, "test").Connect(ctx, serverTransport, nil); err != nil {
 		t.Fatal(err)
@@ -130,5 +135,17 @@ func TestCallTool(t *testing.T) {
 				t.Errorf("isError %v, text %s; want %v and %s", res.IsError, text, tt.isError, tt.want)
 			}
 		})
+	}
+}
+
+func TestServerDown(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	res, err := connectTo(t, server.URL).CallTool(context.Background(), &mcp.CallToolParams{Name: "list_cves"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := res.Content[0].(*mcp.TextContent).Text; !res.IsError || !strings.Contains(text, "connect") {
+		t.Errorf("isError %v, text %s", res.IsError, text)
 	}
 }

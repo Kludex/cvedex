@@ -6,11 +6,20 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/creack/pty"
+
+	"github.com/Kludex/cvedex/cveservices"
 	"github.com/Kludex/cvedex/internal/cassette"
 	"github.com/Kludex/cvedex/internal/cli"
 )
@@ -272,6 +281,62 @@ func TestCommands(t *testing.T) {
 			stdout: []string{"alice@acme.test", "Alice Smith", "ADMIN", "active", "bob@acme.test", "inactive"},
 		},
 		{
+			name: "status without roles",
+			exchanges: []cassette.Exchange{
+				cassette.Load(t, "health-check"),
+				{Method: "GET", Path: cassette.Load(t, "user").Path, Response: `{"username":"alice@acme.test"}`},
+				cassette.Load(t, "org"),
+			},
+			args:   []string{"status"},
+			stdout: []string{"alice@acme.test\n"},
+		},
+		{
+			name: "status when the org lookup fails",
+			exchanges: []cassette.Exchange{
+				cassette.Load(t, "health-check"),
+				cassette.Load(t, "user"),
+				{Method: "GET", Path: cassette.Load(t, "org").Path, Status: 500, Response: `{"message":"Org lookup failed"}`},
+			},
+			args:   []string{"status"},
+			code:   1,
+			stderr: []string{"Org lookup failed"},
+		},
+		{
+			name: "show a record's severity, ranges and non-English description",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/api/cve/CVE-2026-1200", Response: `{` +
+				`"cveMetadata":{"cveId":"CVE-2026-1200","state":"PUBLISHED"},"containers":{"cna":{` +
+				`"descriptions":[{"lang":"es","value":"Desbordamiento."},{"lang":"en"}],` +
+				`"metrics":[{"cvssV3_1":{"baseScore":7.5,"baseSeverity":"HIGH","vectorString":"CVSS:3.1/AV:N"}}],` +
+				`"affected":[{"vendor":"acme","product":"widget","versions":[` +
+				`{"version":"1.0","lessThanOrEqual":"1.4","status":"affected"},{"version":"2.0","status":"unaffected"}]}]}}}`}},
+			args:   []string{"show", "2026-1200"},
+			stdout: []string{"7.5 HIGH  CVSS:3.1/AV:N", "Desbordamiento.", "acme widget  1.0 to 1.4, 2.0 (unaffected)"},
+		},
+		{
+			name: "show a rejected record",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/api/cve/CVE-2026-1201", Response: `{` +
+				`"cveMetadata":{"cveId":"CVE-2026-1201","state":"REJECTED","dateRejected":"2026-10-01T00:00:00Z"},` +
+				`"containers":{"cna":{"rejectedReasons":[{"lang":"en","value":"Duplicate of CVE-2026-1200."}],` +
+				`"metrics":[{"cvssV4_0":{"baseScore":5.0,"baseSeverity":"MEDIUM","vectorString":"CVSS:4.0/AV:N"}}]}}}`}},
+			args:   []string{"show", "2026-1201"},
+			stdout: []string{"REJECTED", "Rejected", "2026-10-01", "5.0 MEDIUM", "Duplicate of CVE-2026-1200."},
+		},
+		{
+			name: "org add-user without roles",
+			exchanges: []cassette.Exchange{{Method: "POST", Path: "/api/org/acme/user",
+				Body:     `{"authority":{"active_roles":[]},"name":{"first":"Bob","last":"Smith"},"username":"bob@acme.test"}`,
+				Response: `{"created":{"username":"bob@acme.test"}}`}},
+			args:   []string{"org", "add-user", "bob@acme.test", "--first", "Bob", "--last", "Smith"},
+			stdout: []string{"bob@acme.test"},
+		},
+		{
+			name: "proposals deny as text",
+			exchanges: cvedexd(cassette.Exchange{Method: "POST", Path: "/api/cvedexd/proposals/p1/deny",
+				Response: `{"id":"p1","status":"denied"}`}),
+			args:   []string{"proposals", "deny", "p1"},
+			stdout: []string{"Denied proposal p1."},
+		},
+		{
 			name: "org add-user",
 			exchanges: []cassette.Exchange{{Method: "POST", Path: "/api/org/acme/user",
 				Body: `{"authority":{"active_roles":["ADMIN"]},"name":{"first":"Bob","last":"Smith"},` +
@@ -531,6 +596,8 @@ func TestLoginFailures(t *testing.T) {
 		stderr    string
 	}{
 		{name: "no key", args: []string{"login"}, stderr: "no API key: pipe it on stdin"},
+		{name: "test instance without an org", env: map[string]string{"CVE_API_ORG": ""}, stdin: "key\n",
+			args: []string{"login", "--test"}, stderr: "missing --org"},
 		{name: "no org or user", env: map[string]string{"CVE_API_ORG": "", "CVE_API_USER": ""}, stdin: "key\n",
 			args: []string{"login"}, stderr: "missing --org and --user"},
 		{name: "wrong key", exchanges: []cassette.Exchange{cassette.Load(t, "unauthorized")}, stdin: "key",
@@ -582,6 +649,7 @@ func TestSavedConfig(t *testing.T) {
 	url := cassette.Serve(t, cassette.Load(t, "cve-id-list"))
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	for _, name := range []string{"CVE_API_URL", "CVE_API_ORG", "CVE_API_USER", "CVE_API_KEY"} {
 		t.Setenv(name, "")
@@ -597,14 +665,103 @@ func TestSavedConfig(t *testing.T) {
 	}{
 		{config: `{"url":"` + url + `","org":"acme","user":"alice@acme.test","key":"key"}`, out: "CVE-2026-1100"},
 		{config: `{"url":`, code: 1, out: path + ": unexpected end of JSON input"},
+		{config: "", code: 1, out: "read " + path},
 	} {
-		if err := os.WriteFile(path, []byte(tt.config), 0o600); err != nil {
+		if tt.config == "" {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(path, []byte(tt.config), 0o600); tt.config != "" && err != nil {
 			t.Fatal(err)
 		}
 		var stdout, stderr bytes.Buffer
 		code := cli.Main(context.Background(), []string{"list"}, strings.NewReader(""), &stdout, &stderr)
 		if code != tt.code || !strings.Contains(stdout.String()+stderr.String(), tt.out) {
 			t.Errorf("exit code %d, output %q; want %d and %q", code, stdout.String()+stderr.String(), tt.code, tt.out)
+		}
+	}
+}
+
+// TestAPIErrors checks every command reports a failing server instead of carrying on.
+func TestAPIErrors(t *testing.T) {
+	failing := func(cvedexd bool) string {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if cvedexd && r.URL.Path == "/api/health-check" {
+				_, _ = io.WriteString(w, `{"server":"cvedexd","version":"0.1.0"}`)
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":"DOWN","message":"Out of service"}`)
+		}))
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+	plain, cvedexd := failing(false), failing(true)
+	tests := []struct {
+		url  string
+		args []string
+	}{
+		{plain, []string{"status"}},
+		{plain, []string{"list"}},
+		{plain, []string{"org"}},
+		{plain, []string{"org", "add-user", "bob@acme.test", "--first", "Bob", "--last", "Smith"}},
+		{plain, []string{"org", "reset-key", "bob@acme.test", "--yes"}},
+		{plain, []string{"review"}},
+		{cvedexd, []string{"status"}},
+		{cvedexd, []string{"review"}},
+		{cvedexd, []string{"review", "show", "CVE-2026-1100"}},
+		{cvedexd, []string{"review", "approve", "CVE-2026-1100"}},
+		{cvedexd, []string{"review", "request-changes", "CVE-2026-1100", "Add a CWE."}},
+		{cvedexd, []string{"proposals"}},
+		{cvedexd, []string{"proposals", "approve", "p1"}},
+		{cvedexd, []string{"proposals", "deny", "p1"}},
+		{cvedexd, []string{"audit"}},
+		{cvedexd, []string{"submitter", "add", "bob"}},
+		{cvedexd, []string{"submitter", "token", "1"}},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			got := run(t, tt.url, "", tt.args...)
+			if got.code != 1 || !strings.Contains(got.stderr, "Out of service (DOWN)") {
+				t.Errorf("exit code %d, stderr %q", got.code, got.stderr)
+			}
+		})
+	}
+}
+
+func TestConfigErrors(t *testing.T) {
+	for _, name := range []string{"HOME", "USERPROFILE", "home", "XDG_CONFIG_HOME"} {
+		t.Setenv(name, "")
+	}
+	var stdout, stderr bytes.Buffer
+	if code := cli.Main(context.Background(), []string{"status"}, strings.NewReader(""), &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "not defined") {
+		t.Errorf("without a home directory: exit code %d, stderr %q", code, stderr.String())
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ignores directory permissions")
+	}
+	for _, readOnly := range []string{".", "cvedex"} {
+		config := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(config, readOnly), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(filepath.Join(config, readOnly), 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("XDG_CONFIG_HOME", config)
+		t.Setenv("CVE_API_URL", cassette.Serve(t, cassette.Load(t, "user")))
+		t.Setenv("CVE_API_KEY", "")
+		stderr.Reset()
+		args := []string{"login", "--org", "acme", "--user", "alice@acme.test"}
+		if code := cli.Main(context.Background(), args, strings.NewReader("key\n"), &stdout, &stderr); code != 1 ||
+			!strings.Contains(stderr.String(), "permission denied") {
+			t.Errorf("read-only %s: exit code %d, stderr %q", readOnly, code, stderr.String())
 		}
 	}
 }
@@ -634,4 +791,178 @@ func TestMCP(t *testing.T) {
 	if c := <-code; c != 0 {
 		t.Errorf("exit code %d", c)
 	}
+}
+
+// terminal runs cvedex in a pseudo-terminal, for the prompts and the TUI.
+type terminal struct {
+	t      *testing.T
+	pty    *os.File
+	mu     sync.Mutex
+	screen bytes.Buffer
+	code   chan int
+}
+
+func startTerminal(t *testing.T, args ...string) *terminal {
+	t.Helper()
+	return startTerminalContext(t, context.Background(), args...)
+}
+
+func startTerminalContext(t *testing.T, ctx context.Context, args ...string) *terminal {
+	t.Helper()
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Skipf("no pseudo-terminal: %v", err)
+	}
+	t.Cleanup(func() { _ = ptmx.Close() })
+	if err := pty.Setsize(tty, &pty.Winsize{Rows: 30, Cols: 120}); err != nil {
+		t.Fatal(err)
+	}
+	term := &terminal{t: t, pty: ptmx, code: make(chan int, 1)}
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(buf)
+			term.mu.Lock()
+			term.screen.Write(buf[:n])
+			term.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	go func() {
+		term.code <- cli.Main(ctx, args, tty, tty, tty)
+		_ = tty.Close()
+	}()
+	return term
+}
+
+func (term *terminal) waitFor(text string) {
+	term.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		term.mu.Lock()
+		screen := ansi.Strip(term.screen.String())
+		term.mu.Unlock()
+		if strings.Contains(screen, text) {
+			return
+		}
+		if time.Now().After(deadline) {
+			term.t.Fatalf("terminal never showed %q:\n%s", text, screen)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (term *terminal) send(keys string) {
+	term.t.Helper()
+	if _, err := term.pty.WriteString(keys); err != nil {
+		term.t.Fatal(err)
+	}
+}
+
+func (term *terminal) exits(code int) {
+	term.t.Helper()
+	select {
+	case got := <-term.code:
+		if got != code {
+			term.t.Errorf("exit code %d, want %d", got, code)
+		}
+	case <-time.After(5 * time.Second):
+		term.t.Fatal("cvedex did not exit")
+	}
+}
+
+func loggedOut(t *testing.T, url string) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CVE_API_URL", url)
+	for _, name := range []string{"CVE_API_ORG", "CVE_API_USER", "CVE_API_KEY"} {
+		t.Setenv(name, "")
+	}
+}
+
+func TestLoginForm(t *testing.T) {
+	user := cassette.Load(t, "user")
+	user.User = "alice@acme.test"
+	url := cassette.Serve(t, user)
+	loggedOut(t, url)
+	term := startTerminal(t, "login")
+	term.waitFor("> Another server")
+	term.send("\r")
+	term.waitFor("Server URL")
+	// huh moves focus asynchronously, so each answer waits for the previous one to land.
+	for _, answer := range []string{"", "", " acme", "alice@acme.test ", "the-key"} {
+		time.Sleep(200 * time.Millisecond)
+		term.send(answer + "\r")
+	}
+	term.waitFor("required")
+	term.waitFor("Logged in to " + url + " as alice@acme.test (acme, ADMIN)")
+	term.exits(0)
+}
+
+func TestLoginFormInterrupted(t *testing.T) {
+	loggedOut(t, cveservices.TestURL)
+	ctx, cancel := context.WithCancel(context.Background())
+	term := startTerminalContext(t, ctx, "login", "--test")
+	term.waitFor("CNA short name")
+	cancel()
+	term.waitFor("Error:")
+	term.exits(1)
+}
+
+func TestLoginFormCancelled(t *testing.T) {
+	loggedOut(t, cveservices.TestURL)
+	term := startTerminal(t, "login", "--test")
+	term.waitFor("CNA short name")
+	term.send("\x03")
+	term.waitFor("login cancelled")
+	term.exits(1)
+}
+
+func TestConfirm(t *testing.T) {
+	run := func(t *testing.T, exchanges []cassette.Exchange, args []string, answer, want string, code int) {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		t.Setenv("CVE_API_URL", cassette.Serve(t, exchanges...))
+		t.Setenv("CVE_API_ORG", "acme")
+		t.Setenv("CVE_API_USER", "alice@acme.test")
+		t.Setenv("CVE_API_KEY", "key")
+		term := startTerminal(t, args...)
+		term.waitFor("?")
+		term.send(answer)
+		term.waitFor(want)
+		term.exits(code)
+	}
+	t.Run("yes", func(t *testing.T) {
+		reset := cassette.Exchange{Method: "PUT", Path: "/api/org/acme/user/bob@acme.test/reset_secret",
+			Response: `{"API-secret":"new-key"}`}
+		run(t, []cassette.Exchange{reset}, []string{"org", "reset-key", "bob@acme.test"}, "y", "new-key", 0)
+	})
+	t.Run("no", func(t *testing.T) {
+		run(t, nil, []string{"--url", cveservices.ProductionURL, "reject", "CVE-2026-1100", "--reason", "Unused."},
+			"n", "cancelled", 1)
+	})
+}
+
+func TestTerminalWidth(t *testing.T) {
+	record := cassette.Load(t, "cve-2025-0001")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CVE_API_URL", cassette.Serve(t, record))
+	t.Setenv("CVE_API_ORG", "acme")
+	t.Setenv("CVE_API_USER", "alice@acme.test")
+	t.Setenv("CVE_API_KEY", "key")
+	term := startTerminal(t, "show", "CVE-2025-0001")
+	term.waitFor("References")
+	term.exits(0)
+}
+
+func TestTUI(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CVE_API_URL", cassette.Serve(t, cassette.Load(t, "health-check"), cassette.Load(t, "cve-id-list")))
+	t.Setenv("CVE_API_ORG", "acme")
+	t.Setenv("CVE_API_USER", "alice@acme.test")
+	t.Setenv("CVE_API_KEY", "key")
+	term := startTerminal(t, "tui")
+	term.waitFor("CVE-2026-1100")
+	term.send("q")
+	term.exits(0)
 }

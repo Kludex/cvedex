@@ -12,21 +12,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          version: 0.16.0
-      - run: zig build test
+          go-version-file: go.mod
+      - run: go test ./...
       - name: Cross-compile
+        env:
+          CGO_ENABLED: "0"
         run: |
           mkdir dist
-          for target in x86_64-linux-musl aarch64-linux-musl x86_64-macos aarch64-macos x86_64-windows; do
-            # Baseline CPU so the binary runs on any machine of that architecture.
-            zig build -Doptimize=ReleaseSafe -Dtarget="$target" -Dcpu=baseline --prefix "out/$target"
-            name="cvedex-${GITHUB_REF_NAME}-${target}"
-            if [[ "$target" == *windows ]]; then
-              (cd "out/$target/bin" && zip -q "../../../dist/$name.zip" cvedex.exe)
+          for target in linux/amd64/x86_64-linux linux/arm64/aarch64-linux darwin/amd64/x86_64-macos \
+            darwin/arm64/aarch64-macos windows/amd64/x86_64-windows; do
+            IFS=/ read -r GOOS GOARCH name <<< "$target"
+            export GOOS GOARCH
+            out="out/$name"
+            go build -trimpath -o "$out/" \
+              -ldflags "-s -w -X github.com/Kludex/cvedex/internal/cli.Version=${GITHUB_REF_NAME}" ./cmd/cvedex
+            archive="cvedex-${GITHUB_REF_NAME}-${name}"
+            if [[ "$GOOS" == windows ]]; then
+              (cd "$out" && zip -q "../../dist/$archive.zip" cvedex.exe)
             else
-              tar -C "out/$target/bin" -czf "dist/$name.tar.gz" cvedex
+              tar -C "$out" -czf "dist/$archive.tar.gz" cvedex
             fi
           done
           (cd dist && sha256sum * > SHA256SUMS)

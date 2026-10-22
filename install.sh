@@ -6,7 +6,7 @@ repo="Kludex/cvedex"
 dest="${CVEDEX_INSTALL_DIR:-$HOME/.local/bin}"
 
 case "$(uname -s)" in
-  Linux) os=linux-musl ;;
+  Linux) os=linux ;;
   Darwin) os=macos ;;
   *) echo "cvedex: unsupported OS $(uname -s); download a release from https://github.com/$repo/releases" >&2; exit 1 ;;
 esac

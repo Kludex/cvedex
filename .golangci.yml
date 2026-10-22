@@ -1,0 +1,12 @@
+version: "2"
+linters:
+  default: none
+  enable: [errcheck, govet, staticcheck, unused, ineffassign, gocritic, lll]
+  settings:
+    lll:
+      line-length: 120
+formatters:
+  enable: [gofmt, goimports]
+  settings:
+    goimports:
+      local-prefixes: [github.com/Kludex/cvedex]

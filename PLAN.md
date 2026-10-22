@@ -2,20 +2,21 @@
 
 One repo, two deliverables:
 
-- **`cvedex`** - a CVE Services client in Zig: library, CLI, TUI, MCP server. Useful to any CNA on its own, like `cvelib` but in one static binary.
+- **`cvedex`** - a CVE Services client in Go: library, CLI, TUI, MCP server. Useful to any CNA on its own, like `cvelib` but in one static binary.
 - **`cvedexd`** - a CNA policy server on Cloudflare Workers + D1, in TypeScript, under `server/`. It exposes the CVE Services API, so `cvedex` points at it unchanged, and adds review, audit and agent approval on top. It stores CVE records as opaque JSON and forwards them, so it shares no code with the client.
 
 ```
-build.zig  build.zig.zon  install.sh  LICENSE  PLAN.md
-src/                 cvedex (Zig)
+go.mod  install.sh  LICENSE  PLAN.md
+cmd/ cveservices/ internal/   cvedex (Go)
+testdata/recorded/   cassettes shared by both test suites
 server/              cvedexd (TypeScript): wrangler.toml, package.json, src/, migrations/
 .github/workflows/
-  ci.yml             zig build test + server vitest, on every PR
+  ci.yml             golangci-lint + go test, server vitest, on every PR
   release.yml        on v* tags: cross-compile, GitHub Release
   deploy.yml         on push to main touching server/**: wrangler d1 migrations apply, wrangler deploy
 ```
 
-`build.zig.zon` `.paths` lists `src`, `build` (the patched test runner), `build.zig`, `build.zig.zon`, `LICENSE` only, so `server/` is not part of the Zig package and `zig fetch` never downloads it. `deploy.yml` uses a Cloudflare API token scoped to Workers and D1 on one account; it is the only workflow that holds it.
+`server/` has no Go files, so `go get` ignores it. `deploy.yml` uses a Cloudflare API token scoped to Workers and D1 on one account; it is the only workflow that holds it.
 
 ## Two kinds of people
 
@@ -39,15 +40,18 @@ Same call, different outcome: `POST /api/cve/{id}/cna` publishes at MITRE, but a
 ### Layout
 
 ```
-src/
-  root.zig        library: Client, record types, errors
-  client.zig      CVE Services HTTP client
-  record.zig      CVE JSON 5.1 types (CNA container; ADP later)
-  main.zig        dispatch: cli | tui | mcp
-  cli/
-  tui/
-  mcp/
+cmd/cvedex/           main
+cveservices/          library: Client, typed errors, CVE IDs, orgs, cvedexd endpoints
+internal/
+  cli/                cobra commands
+  tui/                bubbletea
+  mcpserver/          MCP tools on the official go-sdk
+  render/             lipgloss tables and the record summary
+  config/             ~/.config/cvedex/config.json and env overrides
+  cassette/           test server replaying testdata/recorded/
 ```
+
+Records pass through as `json.RawMessage`: CVE Services validates them, and the client only reads the few fields it renders.
 
 ### Config
 
@@ -58,28 +62,26 @@ src/
 Covers the CVE Services surface a CNA uses day to day:
 
 ```
-cvedex login
-cvedex reserve --year 2025 --count 1 [--sequential]
-cvedex list [--state RESERVED|PUBLISHED|REJECTED]
-cvedex show CVE-2025-0001 [--raw]
-cvedex publish CVE-2025-0001 record.json      POST /api/cve/{id}/cna
-cvedex update  CVE-2025-0001 record.json      PUT  /api/cve/{id}/cna
-cvedex reject  CVE-2025-0001 record.json
-cvedex org show | users | user add | user reset-key
-cvedex ping
+cvedex login [--test]                         prompts in a terminal; --org --user and the key on stdin otherwise
+cvedex status                                 server, user, CNA (alias: ping, whoami)
+cvedex reserve [--year 2026] [-n 1] [--sequential]
+cvedex list [--state reserved|published|rejected]
+cvedex show CVE-2026-0001
+cvedex publish CVE-2026-0001 record.json      POST /api/cve/{id}/cna
+cvedex update  CVE-2026-0001 record.json      PUT  /api/cve/{id}/cna
+cvedex reject  CVE-2026-0001 --reason "..."
+cvedex org | org users | org add-user <name> | org reset-key <name>
 ```
 
-Every command takes `--json`. Errors from CVE Services are returned verbatim. Non-zero exit on error.
+Every command takes `--json`, which prints the API response, and errors as the API's body on stderr. Text output is colored on a terminal only. IDs work without the `CVE-` prefix. `record.json` is a CNA container, bare, wrapped as `{"cnaContainer": ...}`, or a full record as `show --json` prints it; `-` reads stdin. Writes to MITRE production and `reset-key` ask for confirmation, or need `--yes` without a terminal. Non-zero exit on error.
 
-Against `cvedexd` only, the client discovers extra endpoints from `GET /api/health-check` and enables:
+Against `cvedexd` only, checked with `GET /api/health-check`:
 
 ```
-cvedex review                           queue (admin)
-cvedex approve CVE-2025-0001            (admin)
-cvedex request-changes CVE-2025-0001 "note"
-cvedex proposals | approve <proposal-id> | deny <proposal-id>
+cvedex review | review show <id> | review approve <id> | review request-changes <id> "note"
+cvedex proposals | proposals approve <proposal-id> | proposals deny <proposal-id>
 cvedex audit [--user name] [--since date]
-cvedex submitter add <name> | token new [--agent]
+cvedex submitter add <name> | submitter token <id> [--agent]
 ```
 
 ### MCP
@@ -88,7 +90,7 @@ Stdio, JSON-RPC 2.0. Tools map 1:1 to CLI commands: `list_cves`, `show_cve`, `re
 
 ### TUI
 
-Views: CVE list, record viewer, reserve. Against `cvedexd`: review queue, proposals, audit. libvaxis pinned to `5b0c724`, the last commit before it moved to Zig 0.17.
+Tabs: CVE IDs (open a record, reserve), and against `cvedexd` review (read, approve), proposals (approve, deny) and audit. Every write asks y/n first.
 
 ## cvedexd (server)
 
@@ -96,7 +98,7 @@ Cloudflare Worker, D1 for storage. `hono` for routing and middleware. It moves t
 
 ### Why a Worker
 
-One CNA, a handful of people, a few requests a day. The server never parses a CVE record: it checks a token, writes an audit row, stores a blob, flips a state, forwards upstream. There is nothing in it that wants Zig. On a Worker there is no machine, TLS, reverse proxy or backup job to own, and D1 is SQLite with point-in-time restore. The cost is one more language in the project, for about 500 lines.
+One CNA, a handful of people, a few requests a day. The server never parses a CVE record: it checks a token, writes an audit row, stores a blob, flips a state, forwards upstream. There is nothing in it that wants Go. On a Worker there is no machine, TLS, reverse proxy or backup job to own, and D1 is SQLite with point-in-time restore. The cost is one more language in the project, for about 500 lines.
 
 If the server ever needs to be self-hosted, the same code runs on a VPS behind Caddy with `@hono/node-server` and a local SQLite file; the SQL does not change.
 
@@ -148,7 +150,7 @@ A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|sub
 
 ## Dependencies
 
-- `cvedex`: `std` only, plus libvaxis for the TUI. HTTP client from `std.http`; its TLS works against `cveawg.mitre.org`, so `zttp` is not needed. `std.http.Client` 0.16 never sends `privileged_headers`, so the auth headers go as `extra_headers` with redirects disabled.
+- `cvedex`: `net/http` with redirects disabled, so the key never follows a redirect. `cobra` for commands, Charm's `bubbletea`, `bubbles`, `lipgloss` and `huh` for the TUI, output and prompts, `modelcontextprotocol/go-sdk` for MCP.
 - `cvedexd`: `hono`, `wrangler`. Tooling per the TypeScript rules: oxlint, oxc-format, `strict: true`.
 
 ## Phases
@@ -161,7 +163,7 @@ A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|sub
 
 ## Distribution
 
-GitHub Releases. A workflow on `v*` tags runs `zig build -Doptimize=ReleaseSafe -Dtarget=<t>` for `x86_64-linux-musl`, `aarch64-linux-musl`, `x86_64-macos`, `aarch64-macos`, `x86_64-windows`, and uploads one archive per target plus a `SHA256SUMS`. Static musl binaries, so no glibc dependency on Linux.
+GitHub Releases. A workflow on `v*` tags runs `CGO_ENABLED=0 go build` for `x86_64-linux`, `aarch64-linux`, `x86_64-macos`, `aarch64-macos`, `x86_64-windows`, and uploads one archive per target plus a `SHA256SUMS`. Static binaries, so no libc dependency on Linux.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Kludex/cvedex/main/install.sh | sh
@@ -169,21 +171,20 @@ curl -fsSL https://raw.githubusercontent.com/Kludex/cvedex/main/install.sh | sh
 
 `install.sh` detects OS and arch, downloads the latest release, verifies the checksum, and puts `cvedex` in `~/.local/bin`. Release notes come from the merged PRs since the previous tag.
 
-As a library: `zig fetch --save git+https://github.com/Kludex/cvedex`.
+As a library: `go get github.com/Kludex/cvedex/cveservices`.
 
 Later, if people ask: a Homebrew tap and a `.deb`. Not before.
 
 ## Testing
 
-- `cvedex` client tests replay fixtures recorded from `cveawg-test.mitre.org` through an in-test `std.http.Server`.
+- `cvedex` tests drive the CLI, TUI model and MCP server through their public entry points against `internal/cassette`, an `httptest` server that replays the recorded exchanges in order and fails on any other request. `cvedexd` endpoints have no recordings yet, so those tests use inline exchanges in the server's response shapes.
 - `cvedexd` tests run under `@cloudflare/vitest-plugin` (the renamed `vitest-pool-workers`) against a real D1 binding, with upstream calls answered from fixtures by a stubbed `fetch`. 100% coverage is enforced.
-- Cassettes live in `src/testdata/recorded/`, shared by both test suites, and come from `scripts/record-fixtures.mjs`. Each holds the request and the response's status, rate-limit and content headers, and raw body. Without credentials it records the public and error responses; with a test-instance CNA account it records the authenticated reads, and with `--writes` also a reservation and a publish. Tests only replay; CI never calls the test instance.
-- Fuzz MCP JSON-RPC frames in `cvedex` with `zig build test --fuzz`; CI runs 50K inputs on Linux. Zig 0.16.0's test runner does not compile in fuzz mode, so `build/test_runner.zig` is a copy with the one-line fix until a release ships it.
-- CI pins Zig 0.16.0.
+- Cassettes live in `testdata/recorded/`, shared by both test suites, and come from `scripts/record-fixtures.mjs`. Each holds the request and the response's status, rate-limit and content headers, and raw body. Without credentials it records the public and error responses; with a test-instance CNA account it records the authenticated reads, and with `--writes` also a reservation and a publish. Tests only replay; CI never calls the test instance.
+- CI runs `go test -race` on Linux, macOS and Windows.
 
 ## Not in v1
 
-- CVE JSON 5.1 schema validation client-side. Upstream validates; errors are shown verbatim.
+- CVE JSON 5.x schema validation client-side. Upstream validates; errors are shown verbatim.
 - ADP containers.
 - Per-user reservation quotas.
 - MCP elicitation. The proposal queue covers approval for all clients.

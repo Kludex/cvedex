@@ -1,3 +1,0 @@
-#!/bin/sh
-set -eu
-zig fmt src build.zig build.zig.zon

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import unauthorized from "../../src/testdata/recorded/unauthorized.json";
+import unauthorized from "../../testdata/recorded/unauthorized.json";
 import {
   alice,
   aliceCheck,

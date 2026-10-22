@@ -1,10 +1,10 @@
 import { exports } from "cloudflare:workers";
 import { afterEach, vi } from "vitest";
-import badRequestCassette from "../../src/testdata/recorded/bad-request.json";
-import cveIdListCassette from "../../src/testdata/recorded/cve-id-list.json";
-import publishCassette from "../../src/testdata/recorded/publish.json";
-import reserveCassette from "../../src/testdata/recorded/reserve.json";
-import userCassette from "../../src/testdata/recorded/user.json";
+import badRequestCassette from "../../testdata/recorded/bad-request.json";
+import cveIdListCassette from "../../testdata/recorded/cve-id-list.json";
+import publishCassette from "../../testdata/recorded/publish.json";
+import reserveCassette from "../../testdata/recorded/reserve.json";
+import userCassette from "../../testdata/recorded/user.json";
 
 export type Upstream = {
   method: string;

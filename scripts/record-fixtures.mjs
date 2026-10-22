@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Records CVE Services cassettes from the test instance into src/testdata/recorded/.
+// Records CVE Services cassettes from the test instance into testdata/recorded/.
 // Without credentials it records the public endpoints and the error responses. With CVE_API_ORG,
 // CVE_API_USER and CVE_API_KEY set it also records the authenticated reads. With `--writes` it
 // also reserves one ID and publishes a test record to it, which changes state on the test
@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const base = process.env.CVE_API_URL ?? "https://cveawg-test.mitre.org";
-const out = join(import.meta.dirname, "..", "src", "testdata", "recorded");
+const out = join(import.meta.dirname, "..", "testdata", "recorded");
 const { CVE_API_ORG: org, CVE_API_USER: user, CVE_API_KEY: key } = process.env;
 const authed = Boolean(org && user && key);
 const writes = process.argv.includes("--writes");

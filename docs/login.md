@@ -44,6 +44,17 @@ echo "$CVE_API_KEY" | cvedex login --test --org acme --user alice@acme.org
 !!! warning "Keep the key out of your shell history"
     `--key` exists, but anything you type as an argument ends up in your shell history and in `ps`. Prefer the prompt or stdin.
 
+## Only over https
+
+`cvedex` refuses a server URL that starts with `http://`, because every request carries your API key:
+
+```console
+$ cvedex --url http://cve.acme.org status
+Error: http://cve.acme.org would send your API key unencrypted; use https://
+```
+
+`http://localhost` and loopback addresses such as `http://127.0.0.1:8787` are allowed, for a [local cvedexd](cvedexd/deploy.md#run-it-locally).
+
 ## Use another server for one command
 
 `--url` overrides the saved server for a single command:
@@ -64,6 +75,10 @@ These override the saved config, one by one:
 | `CVE_API_KEY` | API key |
 
 They are the names [`cvelib`](https://github.com/RedHatProductSecurity/cvelib) uses, so an existing setup works as is.
+
+## Rate limits
+
+When CVE Services answers `429 Too Many Requests`, `cvedex` waits as long as its `Retry-After` header says, up to a minute, and tries again, three times at most.
 
 !!! note "Production is the default"
     With no config and no `CVE_API_URL`, `cvedex` talks to MITRE production, `https://cveawg.mitre.org`.

@@ -59,6 +59,8 @@ Sent CVE-2026-1102 for review
 
 Nothing reaches MITRE. The record waits for a CNA user to [review it](review.md).
 
+Until they do, you can send it again. Each send is a new revision, and the reviewer sees what changed.
+
 ```console
 $ cvedex list
 CVE ID          STATE                  RESERVED     BY
@@ -82,9 +84,26 @@ CVE-2026-1102: Add the CWE.
 
 Fix the record and send it again with `cvedex publish`. The note clears.
 
+## Update or reject through review
+
+The same goes for an ID you already published, and for one you will not use:
+
+```sh
+cvedex update CVE-2026-1102 record.json
+cvedex reject CVE-2026-1102 --reason "Duplicate of CVE-2026-1100."
+```
+
+Both wait for review, like a first record. The reviewer sees the change against the public record.
+
+## How many IDs you can hold
+
+A submitter can hold 10 IDs that are not published or rejected yet. Past that, `reserve` answers `EXCEEDED_ID_QUOTA`. Publish or reject some, or ask your CNA to raise `MAX_OPEN_IDS`.
+
 ## What a submitter cannot do
 
-Anything else answers `403`: publishing at MITRE, rejecting, updating published records, managing the org. A submitter also cannot see other submitters' IDs.
+Anything else answers `403`: writing at MITRE directly, managing the org, seeing other submitters' IDs.
+
+If your token stops working, it was revoked or your submitter was disabled. Ask your CNA for a new one.
 
 ## Agent tokens
 

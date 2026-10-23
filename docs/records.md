@@ -94,6 +94,30 @@ Reject an ID you will not use, or a duplicate. An unused reserved ID stays reser
 cvedex reject CVE-2026-1101 --reason "Duplicate of CVE-2026-1100."
 ```
 
+This publishes a rejected record. On a published ID, it replaces the record, and the CVE stays rejected for good.
+
+To reject a reserved ID without publishing anything, use `--id-only`. `unreject` reserves it again:
+
+```console
+$ cvedex reject CVE-2026-1101 --id-only
+CVE-2026-1101 is REJECTED
+Check it with cvedex list --state rejected
+
+$ cvedex unreject CVE-2026-1101
+CVE-2026-1101 is RESERVED
+Check it with cvedex list --state reserved
+```
+
+## Add an ADP container
+
+Organizations with the ADP role, such as CISA, add their own container to records other CNAs published:
+
+```sh
+cvedex adp CVE-2026-1100 adp.json
+```
+
+The file holds the container, bare or as `{"adpContainer": ...}`. Running it again replaces your container. Without the ADP role, CVE Services answers `ADP_ONLY`.
+
 ## List and show
 
 ```console
@@ -104,7 +128,18 @@ CVE-2026-1100   PUBLISHED   2026-10-22   alice@acme.org
 CVE-2026-1101   RESERVED    2026-10-22   alice@acme.org
 ```
 
-Filter with `--state reserved`, `published` or `rejected`.
+| Flag | Meaning |
+| --- | --- |
+| `--state` | `reserved`, `published` or `rejected` |
+| `--year` | IDs of one year |
+| `--reserved-after`, `--reserved-before` | Reserved in a time range |
+| `--modified-after`, `--modified-before` | Changed in a time range |
+
+Times are dates, such as `2026-10-01`, or RFC 3339 times, such as `2026-10-01T12:00:00Z`:
+
+```sh
+cvedex list --state reserved --reserved-before 2026-01-01
+```
 
 ```console
 $ cvedex show CVE-2026-1100

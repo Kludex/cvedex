@@ -95,17 +95,21 @@ func main() {
 
 | Method | Does |
 | --- | --- |
-| `ListIDs(ctx, state)` | Your CNA's IDs, all pages |
+| `ListIDs(ctx, IDFilter{...})` | Your CNA's IDs, all pages, by state, year or time |
+| `ID`, `SetIDState` | One ID, and moving it between reserved and rejected |
 | `Record(ctx, id)` | A CVE record |
-| `Publish`, `Update`, `Reject` | Write a record |
-| `Org`, `User`, `Users`, `AddUser`, `ResetKey` | Your CNA and its users |
+| `Publish`, `Update`, `Reject`, `ADP` | Write a record |
+| `Org`, `Quota`, `User`, `Users`, `AddUser`, `UpdateUser`, `ResetKey` | Your CNA and its users |
 | `Health` | The server, and whether it is cvedexd |
-| `Review`, `Approve`, `RequestChanges` | cvedexd review |
+| `Review`, `Approve`, `RequestChanges` | cvedexd review, naming the revision you read |
 | `Proposals`, `ApproveProposal`, `DenyProposal` | cvedexd agent proposals |
-| `Audit`, `AddSubmitter`, `NewToken` | cvedexd administration |
+| `Audit` | The cvedexd audit log, a page at a time |
+| `Submitters`, `AddSubmitter`, `SetSubmitterDisabled`, `Tokens`, `NewToken`, `RevokeToken` | cvedexd submitters and their tokens |
 | `Do(ctx, method, path, query, body, out)` | Any other endpoint |
 
 !!! note "The key never follows a redirect"
     The client does not follow redirects, so your API key is only ever sent to the URL you gave it.
+
+A `429` is retried after its `Retry-After`, up to a minute, three times at most. Cancel the context to stop waiting.
 
 The full reference is on [pkg.go.dev](https://pkg.go.dev/github.com/Kludex/cvedex/cveservices).

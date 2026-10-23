@@ -7,7 +7,14 @@ Roles      CNA
 ID quota   1000
 ```
 
-The ID quota is how many reserved, unpublished IDs your CNA can hold at once.
+The ID quota is how many reserved, unpublished IDs your CNA can hold at once. See how much of it you use:
+
+```console
+$ cvedex org quota
+Quota      1000
+Reserved   12
+Available  988
+```
 
 ## List users
 
@@ -29,6 +36,24 @@ Give them an API key with cvedex org reset-key carol@acme.org
 ```
 
 Pass `--admin` to make them an org admin.
+
+## Change a user
+
+Org admins only. Pass what changes:
+
+```sh
+cvedex org update-user carol@acme.org --last Díaz-Ruiz
+cvedex org update-user carol@acme.org --username carol.diaz@acme.org
+cvedex org update-user carol@acme.org --admin=false
+cvedex org update-user carol@acme.org --active=false
+```
+
+| Flag | Changes |
+| --- | --- |
+| `--first`, `--last` | Their name |
+| `--username` | Their username |
+| `--admin`, `--admin=false` | Gives or takes the org admin role |
+| `--active=false`, `--active` | Deactivates them, or lets them in again. Their key stops working while inactive |
 
 ## Give a user a new API key
 

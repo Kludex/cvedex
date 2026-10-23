@@ -6,4 +6,10 @@ Without credentials the script records only the public and error responses. The 
 CVE_API_ORG=... CVE_API_USER=... CVE_API_KEY=... scripts/record-fixtures.mjs --writes
 ```
 
+`--lifecycle` also moves a reserved ID to rejected and back, rejects one ID before and one after publishing, tries an ADP write, and updates the user's name to itself. Each write is real, so run it rarely. `--only=a,b` rewrites just the named cassettes:
+
+```sh
+CVE_API_ORG=... CVE_API_USER=... CVE_API_KEY=... scripts/record-fixtures.mjs --lifecycle --only=reject,reject-published
+```
+
 The script replaces the account's org name, short name, UUIDs, username and real name with `acme` / `alice@acme.test` placeholders, and writes nothing if any of them or the key is still in a cassette. Read every new cassette before committing it anyway.

@@ -55,14 +55,34 @@ CVE_API_URL = "https://cveawg-test.mitre.org"
 
 The service user and your CNA users then need test-instance accounts.
 
+## Settings
+
+Variables go under `[vars]` in `wrangler.toml`. Secrets go in with `npx wrangler secret put <NAME>`.
+
+| Name | Kind | Default | Meaning |
+| --- | --- | --- | --- |
+| `CVE_API_URL` | Variable | `https://cveawg.mitre.org` | The CVE Services `cvedexd` talks to |
+| `MAX_OPEN_IDS` | Variable | `10` | How many unpublished IDs one submitter may hold |
+| `CVE_API_ORG`, `CVE_API_USER`, `CVE_API_KEY` | Secrets | | The service user that reserves IDs. `CVE_API_ORG` is also the only CNA whose users may sign in |
+| `WEBHOOK_URL` | Secret, optional | | A Slack-compatible incoming webhook. `cvedexd` posts `{"text": "..."}` to it about reviews and proposals |
+
+The `AUTH_LIMITER` [rate limit](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/) in `wrangler.toml` caps CNA user sign-ins at 60 a minute per client IP, so nobody can use `cvedexd` to guess keys at MITRE.
+
+!!! tip "Also rate-limit at the edge"
+    The binding counts per Cloudflare location. For a hard limit across all of them, add a [rate limiting rule](https://developers.cloudflare.com/waf/rate-limiting-rules/) on your custom domain, for example 100 requests per 10 seconds per IP on `/api/`.
+
 ## Deploy from GitHub Actions
 
-`.github/workflows/deploy.yml` runs the checks and tests, applies migrations and deploys on every push to `main` that touches `server/`. It needs two repository secrets:
+`.github/workflows/deploy.yml` runs the checks and tests, applies migrations and deploys on every push to `main` that touches `server/`.
+
+Create a GitHub environment named `cloudflare`, with two secrets:
 
 | Secret | Value |
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | An API token with the account permissions Workers Scripts: Edit and D1: Edit |
 | `CLOUDFLARE_ACCOUNT_ID` | Your account ID, from the Workers dashboard |
+
+Under **Deployment branches and tags**, allow only `main` and `v*` tags. A workflow on any other branch then cannot read the token.
 
 The `CVE_API_*` secrets stay in Cloudflare. GitHub never sees them.
 

@@ -14,11 +14,11 @@ wrangler.toml        the cvedex-docs Worker that serves them
 server/              cvedexd (TypeScript): wrangler.toml, package.json, src/, migrations/
 .github/workflows/
   ci.yml             golangci-lint + go test, server vitest, on every PR
-  release.yml        on v* tags: cross-compile, GitHub Release
+  release.yml        on v* tags: cross-compile, attest provenance, GitHub Release, deploy docs
   deploy.yml         on push to main touching server/**: wrangler d1 migrations apply, wrangler deploy
 ```
 
-`server/` has no Go files, so `go get` ignores it. `deploy.yml` uses a Cloudflare API token scoped to Workers and D1 on one account; it is the only workflow that holds it.
+`server/` has no Go files, so `go get` ignores it. The Cloudflare token that deploys `cvedexd` and the docs lives in the `cloudflare` GitHub environment, limited to `main` and `v*` tags. Docs previews on pull requests use a separate `docs-preview` environment and token, so a pull request never reaches the deploy token.
 
 ## Two kinds of people
 
@@ -29,7 +29,7 @@ server/              cvedexd (TypeScript): wrangler.toml, package.json, src/, mi
 
 CVE Services has no "reserve only" permission, so a submitter must never hold an upstream key. `cvedexd` reserves on their behalf with one service-account key and never publishes anything a CNA user has not approved.
 
-`cvedexd` does not keep a list of CNA users. A request whose `CVE-API-KEY` is not a known submitter token is checked upstream with `GET /api/org/{org}/user/{user}`; if CVE Services accepts the credentials, the caller is a CNA user. One source of truth, no second password for reviewers, and approvals go upstream with the reviewer's own key so MITRE's records name the real person.
+`cvedexd` does not keep a list of CNA users. A request whose `CVE-API-KEY` is not a `cvedexd_` token, and whose `CVE-API-ORG` is the org `cvedexd` serves, is checked upstream with `GET /api/org/{org}/user/{user}`; if CVE Services accepts the credentials, the caller is a CNA user. These checks are rate-limited per IP, so `cvedexd` is no oracle for guessing keys. One source of truth, no second password for reviewers, and approvals go upstream with the reviewer's own key so MITRE's records name the real person.
 
 ## Why the server mirrors the CVE Services API
 
@@ -67,38 +67,43 @@ Covers the CVE Services surface a CNA uses day to day:
 cvedex login [--test]                         prompts in a terminal; --org --user and the key on stdin otherwise
 cvedex status                                 server, user, CNA (alias: ping, whoami)
 cvedex reserve [--year 2026] [-n 1] [--sequential]
-cvedex list [--state reserved|published|rejected]
+cvedex list [--state s] [--year y] [--reserved-after/-before t] [--modified-after/-before t]
 cvedex show CVE-2026-0001
 cvedex publish CVE-2026-0001 record.json      POST /api/cve/{id}/cna
 cvedex update  CVE-2026-0001 record.json      PUT  /api/cve/{id}/cna
-cvedex reject  CVE-2026-0001 --reason "..."
-cvedex org | org users | org add-user <name> | org reset-key <name>
+cvedex reject  CVE-2026-0001 --reason "..."   POST /api/cve/{id}/reject, or PUT once published
+cvedex reject  CVE-2026-0001 --id-only | unreject CVE-2026-0001    PUT /api/cve-id/{id}?state=
+cvedex adp     CVE-2026-0001 adp.json         PUT  /api/cve/{id}/adp
+cvedex org | org quota | org users | org add-user <name> | org update-user <name> | org reset-key <name>
 ```
 
-Every command takes `--json`, which prints the API response, and errors as the API's body on stderr. Text output is colored on a terminal only. IDs work without the `CVE-` prefix. `record.json` is a CNA container, bare, wrapped as `{"cnaContainer": ...}`, or a full record as `show --json` prints it; `-` reads stdin. Writes to MITRE production and `reset-key` ask for confirmation, or need `--yes` without a terminal. Non-zero exit on error.
+Every command takes `--json`, which prints the API response, and errors as the API's body on stderr. Text output is colored on a terminal only, and control characters from the server are printed as escapes. Server URLs must be https, except to loopback. A `429` is retried after `Retry-After`, three times at most. IDs work without the `CVE-` prefix. `record.json` is a CNA container, bare, wrapped as `{"cnaContainer": ...}`, or a full record as `show --json` prints it; `-` reads stdin. Writes to MITRE production and `reset-key` ask for confirmation, or need `--yes` without a terminal. Non-zero exit on error.
 
 Against `cvedexd` only, checked with `GET /api/health-check`:
 
 ```
-cvedex review | review show <id> | review approve <id> | review request-changes <id> "note"
-cvedex proposals | proposals approve <proposal-id> | proposals deny <proposal-id>
-cvedex audit [--user name] [--since date]
-cvedex submitter add <name> | submitter token <id> [--agent]
+cvedex review | review show <id> | review approve <id> --revision n | review request-changes <id> "note" --revision n
+cvedex proposals | proposals show <id> | proposals approve <id> | proposals deny <id>
+cvedex audit [--user name] [--since date] [--before id]
+cvedex submitter | submitter add <name> | submitter disable|enable <id>
+cvedex submitter token <id> [--agent] | submitter tokens <id> | submitter revoke <token-id>
 ```
+
+`review show` prints a summary, a diff against the previous revision or the published record, and the full JSON, so a field the summary leaves out cannot hide.
 
 ### MCP
 
-Stdio, JSON-RPC 2.0. Tools map 1:1 to CLI commands: `list_cves`, `show_cve`, `reserve_ids`, `publish_cve`, `update_cve`. Write tools carry `destructiveHint`; read tools `readOnlyHint`. Against MITRE directly, the MCP client prompt is the only guard. Against `cvedexd` with an agent token, writes return `{status: "pending_approval", proposal_id}` and the human approves from the CLI or TUI.
+Stdio, JSON-RPC 2.0. Tools map 1:1 to CLI commands: `list_cves`, `show_cve`, `reserve_ids`, `publish_cve`, `update_cve`, `reject_cve`. Write tools carry `destructiveHint`; read tools `readOnlyHint`. `cvedex mcp --read-only` offers only the read tools, because a published record is untrusted text that can carry instructions for the agent. Against MITRE directly, the MCP client prompt is the only guard. Against `cvedexd` with an agent token, writes return `{status: "pending_approval", proposal_id}` and the human approves from the CLI or TUI.
 
 ### TUI
 
-Tabs: CVE IDs (open a record, edit, reserve), and against `cvedexd` review (read, approve), proposals (approve, deny) and audit. Every write asks y/n first.
+Tabs: CVE IDs (open a record, edit, reserve), and against `cvedexd` review (read with the diff, approve the revision read), proposals (read, approve, deny) and audit. Every write asks y/n first.
 
-`e` opens the CNA container in `$VISUAL` or `$EDITOR`, without the `providerMetadata` CVE Services fills in, or a template for a reserved ID. On save it asks to publish or update. A draft the API rejects is kept and reopens on the next `e`, with the validation errors shown under it.
+`e` opens the CNA container in `$VISUAL` or `$EDITOR`, without the `providerMetadata` CVE Services fills in, or a template for a reserved ID. On save it asks to publish or update. A draft the API rejects is kept and reopens on the next `e`, with the validation errors shown under it. Quitting with unsent drafts asks, then deletes them.
 
 ## cvedexd (server)
 
-Cloudflare Worker, D1 for storage. `hono` for routing and middleware. It moves to `tastapi` (`~/dev/personal/tastapi`) once that is ready. Secrets via `wrangler secret`: `CVE_API_URL`, `CVE_API_ORG`, `CVE_API_USER`, `CVE_API_KEY` for the service account that reserves IDs on behalf of submitters. That key is used for nothing else.
+Cloudflare Worker, D1 for storage. `hono` for routing and middleware. It moves to `tastapi` (`~/dev/personal/tastapi`) once that is ready. Secrets via `wrangler secret`: `CVE_API_ORG`, `CVE_API_USER`, `CVE_API_KEY` for the service account that reserves IDs on behalf of submitters, and an optional `WEBHOOK_URL`. That key is used for nothing else. Variables: `CVE_API_URL`, and `MAX_OPEN_IDS`, the unpublished IDs one submitter may hold. Bodies over 1 MiB are refused, and upstream redirects are never followed.
 
 ### Why a Worker
 
@@ -109,12 +114,12 @@ If the server ever needs to be self-hosted, the same code runs on a VPS behind C
 ### Record states
 
 ```
-reserved -> in_review -> published
-     ^          |
-     +----------+  (changes_requested, note stored)
+reserved -> in_review -> publishing -> published or rejected
+     ^          |                         |
+     +----------+  (note stored)          +--> in_review again (update or reject)
 ```
 
-A reviewer's note sends the record back to `reserved`. The client shows that ID as "changes requested", with the note, until the submitter sends it again.
+Each submission carries an `action`, `publish` or `reject`, and bumps the ID's `revision`; every revision is kept in `revisions`. Approve names the revision the reviewer read and atomically moves the ID to `publishing`, so a newer revision or a second reviewer gets `409`. A reviewer's note sends the record back to `reserved`. The client shows that ID as "changes requested", with the note, until the submitter sends it again. Direct writes by CNA users to a tracked ID update its state too.
 
 ### Endpoints
 
@@ -125,7 +130,7 @@ CVE Services-compatible, forwarded or reinterpreted:
 | `POST` | `/api/cve-id` | Submitter: forward with the service key, record owner. CNA user: forward with their key. |
 | `GET` | `/api/cve-id`, `/api/cve-id/{id}` | Submitter: own IDs. CNA user: all. |
 | `GET` | `/api/cve/{id}` | Local record if any, else upstream |
-| `POST` `PUT` | `/api/cve/{id}/cna` | Submitter: store record, state `in_review`, nothing reaches upstream. CNA user: forward with their key. |
+| `POST` `PUT` | `/api/cve/{id}/cna`, `/api/cve/{id}/reject` | Submitter: store record and action, state `in_review`, nothing reaches upstream. CNA user: forward with their key. |
 | `*` | anything else under `/api/` | CNA user: forward with their key. Submitter: `403`. |
 | `GET` | `/api/health-check` | Reports `cvedexd` and version, so the client enables extra commands |
 
@@ -133,26 +138,28 @@ Server-only, under `/api/cvedexd/`:
 
 | Method | Path | Who | Effect |
 | --- | --- | --- | --- |
-| `GET` | `/review` | CNA user | Records in `in_review` |
-| `POST` | `/cve/{id}/approve` | CNA user | Forwards the stored record upstream with the reviewer's key. State `published`. Upstream errors returned verbatim. |
-| `POST` | `/cve/{id}/request-changes` `{note}` | CNA user | State `reserved`, note stored |
+| `GET` | `/review` | CNA user | Records in `in_review`, with the previous revision and the published record |
+| `POST` | `/cve/{id}/approve` `{revision}` | CNA user | Forwards the stored record or rejection upstream with the reviewer's key. Upstream errors returned verbatim, and the ID goes back to `in_review`. |
+| `POST` | `/cve/{id}/request-changes` `{note, revision}` | CNA user | State `reserved`, note stored |
 | `GET` | `/proposals` | submitter | Pending agent actions on own account |
 | `POST` | `/proposals/{id}/approve` or `/deny` | submitter | Replays or discards |
-| `GET` | `/audit?user=&since=` | CNA user | Audit rows |
-| `POST` | `/submitters` `{name}` | CNA user | Creates submitter, returns first token |
-| `POST` | `/submitters/{id}/tokens` `{kind}` | CNA user or self | New `user` or `agent` token |
+| `GET` | `/audit?user=&since=&before=` | CNA user | Audit rows, 500 a page, with the `next` cursor |
+| `GET` `POST` | `/submitters` | CNA user | Lists submitters, or creates one and returns its first token |
+| `POST` | `/submitters/{id}/disable` or `/enable` | CNA user | Refuses or accepts their tokens; disabling denies their pending proposals |
+| `GET` `POST` | `/submitters/{id}/tokens` | CNA user or self | Lists tokens, or issues a `user` or `agent` one |
+| `DELETE` | `/tokens/{id}` | CNA user or owner | Revokes a token and denies its pending proposals |
 
 ### Agent approval
 
-A `hono` middleware: a non-`GET` request with an `agent` token is stored as `{submitter, method, path, body}` and answered `202 {proposal_id}`. The submitter's `user` token approves and the server replays the request as them. Enforced server-side, so it holds even when the MCP client runs without permission prompts. Agent tokens exist only for submitters; a CNA user who wants an agent creates a submitter for it.
+A `hono` middleware: a non-`GET` request with an `agent` token is stored as `{submitter, method, path, body}` and answered `202 {proposal_id}`, up to 50 pending per submitter. The submitter's `user` token approves and the server replays the request as them. Enforced server-side, so it holds even when the MCP client runs without permission prompts. Agent tokens exist only for submitters; a CNA user who wants an agent creates a submitter for it.
 
 ### Audit
 
-A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|submitter|agent), token_id, method, path, status, body_sha256, proposal_id`. Reviewer actions are rows like any other.
+A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|submitter|agent), token_id, method, path, status, body_sha256, proposal_id`. The row is written before the request runs and its status filled in after, so a request that dies still leaves a row, with a `null` status. Reviewer actions are rows like any other. An optional webhook hears about submissions, decisions and proposals.
 
 ### Tables
 
-`submitters`, `tokens`, `cves`, `proposals`, `audit`. Schema changes are numbered files in `server/migrations/`, applied with `wrangler d1 migrations apply`.
+`submitters`, `tokens`, `cves`, `revisions`, `proposals`, `audit`. Schema changes are numbered files in `server/migrations/`, applied with `wrangler d1 migrations apply`.
 
 ## Dependencies
 
@@ -169,13 +176,13 @@ A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|sub
 
 ## Distribution
 
-GitHub Releases. A workflow on `v*` tags runs `CGO_ENABLED=0 go build` for `x86_64-linux`, `aarch64-linux`, `x86_64-macos`, `aarch64-macos`, `x86_64-windows`, and uploads one archive per target plus a `SHA256SUMS`. Static binaries, so no libc dependency on Linux.
+GitHub Releases. A workflow on `v*` tags runs `CGO_ENABLED=0 go build` for `x86_64-linux`, `aarch64-linux`, `x86_64-macos`, `aarch64-macos`, `x86_64-windows`, attests their build provenance, and uploads one archive per target plus a `SHA256SUMS`. Static binaries, so no libc dependency on Linux.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Kludex/cvedex/main/install.sh | sh
 ```
 
-`install.sh` detects OS and arch, downloads the latest release, verifies the checksum, and puts `cvedex` in `~/.local/bin`. Release notes come from the merged PRs since the previous tag.
+`install.sh` detects OS and arch, downloads the latest release, verifies the checksum, checks the provenance with `gh attestation verify` when `gh` is logged in, and puts `cvedex` in `~/.local/bin`. Release notes come from the merged PRs since the previous tag.
 
 As a library: `go get github.com/Kludex/cvedex/cveservices`.
 
@@ -185,7 +192,7 @@ Later, if people ask: a Homebrew tap and a `.deb`. Not before.
 
 - `cvedex` tests drive the CLI, TUI model and MCP server through their public entry points against `internal/cassette`, an `httptest` server that replays the recorded exchanges in order and fails on any other request. `cvedexd` endpoints have no recordings yet, so those tests use inline exchanges in the server's response shapes.
 - `cvedexd` tests run under `@cloudflare/vitest-plugin` (the renamed `vitest-pool-workers`) against a real D1 binding, with upstream calls answered from fixtures by a stubbed `fetch`. 100% coverage is enforced.
-- Cassettes live in `testdata/recorded/`, shared by both test suites, and come from `scripts/record-fixtures.mjs`. Each holds the request and the response's status, rate-limit and content headers, and raw body. Without credentials it records the public and error responses; with a test-instance CNA account it records the authenticated reads, and with `--writes` also a reservation and a publish. Tests only replay; CI never calls the test instance.
+- Cassettes live in `testdata/recorded/`, shared by both test suites, and come from `scripts/record-fixtures.mjs`. Each holds the request and the response's status, rate-limit and content headers, and raw body. Without credentials it records the public and error responses; with a test-instance CNA account it records the authenticated reads, with `--writes` also a reservation and a publish, and with `--lifecycle` the ID state changes, both rejects and a user update. `--only=a,b` rewrites just those cassettes. Tests only replay; CI never calls the test instance.
 - CI runs `go test -race` on Linux, macOS and Windows, and enforces 100% coverage of `cveservices/` and `internal/` on Linux. The prompts and `cvedex tui` are tested in a pseudo-terminal, which Windows skips.
 
 ## Docs
@@ -195,8 +202,8 @@ User docs live in `docs/`, built with [Zensical](https://zensical.org). Preview 
 ## Not in v1
 
 - CVE JSON 5.x schema validation client-side. Upstream validates; errors are shown verbatim.
-- ADP containers.
-- Per-user reservation quotas.
+- Per-CNA-user reservation quotas. Submitters have `MAX_OPEN_IDS`.
+- A Windows install script, and storing the key in the OS keychain. The config file is `0600`; a keychain is worth it once someone asks.
 - MCP elicitation. The proposal queue covers approval for all clients.
 - Multiple CNA orgs per `cvedexd`.
 - Caching the upstream credential check. One extra upstream call per CNA-user request; cache when it hurts.

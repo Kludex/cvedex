@@ -148,6 +148,7 @@ Server-only, under `/api/cvedexd/`:
 | `GET` `POST` | `/submitters` | CNA user | Lists submitters, or creates one and returns its first token |
 | `POST` | `/submitters/{id}/disable` or `/enable` | CNA user | Refuses or accepts their tokens; disabling denies their pending proposals |
 | `GET` `POST` | `/submitters/{id}/tokens` | CNA user or self | Lists tokens, or issues a `user` or `agent` one |
+| `GET` | `/published` | anyone | Published IDs of the CNA, from upstream `state=PUBLISHED` with the service key, every page. Cached 10 minutes, so anonymous traffic cannot drive upstream calls. For a public advisory index such as marcelotryle.com/cna. |
 | `DELETE` | `/tokens/{id}` | CNA user or owner | Revokes a token and denies its pending proposals |
 
 ### Agent approval

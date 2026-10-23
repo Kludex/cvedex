@@ -74,6 +74,21 @@ Under `/api/cvedexd/`:
 | `GET` | `/submitters/{id}/tokens` | CNA user, or that submitter | Their tokens, without the secrets |
 | `POST` | `/submitters/{id}/tokens` | CNA user, or that submitter | Issues a token, with body `{"kind": "user"}` or `{"kind": "agent"}` |
 | `DELETE` | `/tokens/{id}` | CNA user, or the token's submitter | Revokes it, and denies the proposals it made |
+| `GET` | `/published` | Anyone | Your CNA's published CVE IDs |
+
+### Published IDs
+
+`GET /api/cvedexd/published` needs no headers. It is there so a website can list your CNA's CVEs without holding any credentials:
+
+```console
+$ curl https://cve.acme.org/api/cvedexd/published
+["CVE-2026-1099","CVE-2026-1101"]
+```
+
+`cvedexd` asks CVE Services with the service account, so the list includes CVEs published without going through `cvedexd`. Fetch each record from the public `https://cveawg.mitre.org/api/cve/{id}`.
+
+!!! info "Up to 10 minutes behind"
+    The answer is cached for 10 minutes, so anonymous visitors cannot make `cvedexd` call CVE Services more often than that.
 
 ### Review items
 

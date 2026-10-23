@@ -82,7 +82,7 @@ export function submitter(c: AppContext): Submitter {
 }
 
 export function fail(
-  status: 400 | 401 | 403 | 404 | 409 | 413 | 429,
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 429 | 502,
   error: string,
   message: string,
 ) {

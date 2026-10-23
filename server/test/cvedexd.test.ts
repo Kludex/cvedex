@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   alice,
   aliceCheck,
@@ -487,4 +487,60 @@ it("unknown cvedexd endpoints are 404", async () => {
   mockUpstream(aliceCheck);
   const res = await api("/api/cvedexd/nothing", { headers: alice });
   expect(res.status).toBe(404);
+});
+
+describe("published", () => {
+  const feed = new Request("https://cvedexd.test/api/cvedexd/published");
+  const entry = (cve_id: string, state: string) => ({ cve_id, state });
+
+  beforeEach(async () => {
+    await caches.default.delete(feed);
+  });
+
+  it("lists the CNA's published IDs to anyone, from every page, and caches them", async () => {
+    const calls = mockUpstream(
+      {
+        method: "GET",
+        path: "/api/cve-id?state=PUBLISHED",
+        body: {
+          cve_ids: [entry("CVE-2026-1099", "PUBLISHED"), entry("CVE-2026-1100", "RESERVED")],
+          nextPage: 2,
+        },
+      },
+      {
+        method: "GET",
+        path: "/api/cve-id?state=PUBLISHED&page=2",
+        body: { cve_ids: [entry("CVE-2026-1101", "PUBLISHED")], nextPage: null },
+      },
+    );
+    const res = await api("/api/cvedexd/published");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=600");
+    expect(await res.json()).toEqual(["CVE-2026-1099", "CVE-2026-1101"]);
+    expect(calls.map((call) => call.headers.get("CVE-API-USER"))).toEqual([
+      "service@acme.test",
+      "service@acme.test",
+    ]);
+
+    const again = await api("/api/cvedexd/published");
+    expect(await again.json()).toEqual(["CVE-2026-1099", "CVE-2026-1101"]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("does not cache a failure", async () => {
+    const calls = mockUpstream({
+      method: "GET",
+      path: "/api/cve-id?state=PUBLISHED",
+      status: 500,
+      body: badRequest,
+    });
+    const res = await api("/api/cvedexd/published");
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({
+      error: "UPSTREAM_ERROR",
+      message: "CVE Services answered 500",
+    });
+    await api("/api/cvedexd/published");
+    expect(calls).toHaveLength(2);
+  });
 });

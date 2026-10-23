@@ -64,7 +64,7 @@ cvedex record from-advisory https://github.com/acme/widget/security/advisories/G
 
 | Advisory | Record |
 | --- | --- |
-| Summary | `title` |
+| Summary | `title`, after the project: "widget has path traversal in its file server" |
 | Description | `descriptions` |
 | Each package and its vulnerable range | An `affected` entry: owner as vendor, package as product, the range as `version` and `lessThan` |
 | CWEs | `problemTypes` |

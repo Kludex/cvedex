@@ -98,6 +98,28 @@ func TestFromAdvisoryAffected(t *testing.T) {
 	}
 }
 
+func TestFromAdvisoryTitle(t *testing.T) {
+	tests := []struct{ summary, want string }{
+		{"Denial of service via a boundary", "python-multipart has denial of service via a boundary"},
+		{"DoS via a boundary", "python-multipart has DoS via a boundary"},
+		{"XSS in the form", "python-multipart has XSS in the form"},
+		{"Élévation de privilèges", "python-multipart has élévation de privilèges"},
+		{"Python-Multipart vulnerable to DoS", "Python-Multipart vulnerable to DoS"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.summary, func(t *testing.T) {
+			var got string
+			if title, ok := fromAdvisory(t, map[string]any{"summary": tt.summary})["title"]; ok {
+				_ = json.Unmarshal(title, &got)
+			}
+			if got != tt.want {
+				t.Errorf("title %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFromAdvisoryMetrics(t *testing.T) {
 	v3 := "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
 	v4 := "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"

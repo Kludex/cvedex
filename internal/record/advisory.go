@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // AdvisoryHint is the start of a GitHub repository advisory URL, for help and error messages.
@@ -173,7 +175,7 @@ var link = regexp.MustCompile("https?://[^\\s<>()\\[\\]\"'`]+")
 
 func (a advisory) container(owner, repo string) container {
 	c := container{
-		Title:        a.Summary,
+		Title:        title(repo, a.Summary),
 		Descriptions: []text{{Lang: "en", Value: a.Description}},
 		References:   []reference{{URL: a.HTMLURL, Tags: []string{"vendor-advisory"}}},
 		Source:       source{Advisory: a.GHSAID, Discovery: "UNKNOWN"},
@@ -214,6 +216,20 @@ func (a advisory) container(owner, repo string) container {
 		c.Credits = append(c.Credits, credit{Lang: "en", Value: cr.User.Login, Type: strings.ReplaceAll(cr.Type, "_", " ")})
 	}
 	return c
+}
+
+// title names the project first, as GitHub's CNA does: "widget has path traversal in its file
+// server". A summary that already starts with the name, or is empty, is kept.
+func title(repo, summary string) string {
+	if summary == "" || strings.HasPrefix(strings.ToLower(summary), strings.ToLower(repo)) {
+		return summary
+	}
+	first, _, _ := strings.Cut(summary, " ")
+	r, size := utf8.DecodeRuneInString(first)
+	if rest := first[size:]; rest == strings.ToLower(rest) {
+		summary = string(unicode.ToLower(r)) + summary[size:]
+	}
+	return repo + " has " + summary
 }
 
 var bound = regexp.MustCompile(`^(>=|<=|<|=)\s*(\S+)$`)

@@ -261,7 +261,7 @@ func TestCommands(t *testing.T) {
 			name:      "record from-advisory",
 			exchanges: []cassette.Exchange{cassette.Load(t, "advisory")},
 			args:      []string{"record", "from-advisory", advisoryURL},
-			stdout: []string{`"title": "Denial of service (DoS) via deformation`, `"lessThan": "0.0.18"`,
+			stdout: []string{`"title": "python-multipart has denial of service (DoS) via deformation`, `"lessThan": "0.0.18"`,
 				`"cweId": "CWE-770"`, `"cvssV3_1": {`, `"value": "defnull",`, `"advisory": "GHSA-59g5-xgcq-4qw3"`},
 		},
 		{

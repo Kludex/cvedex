@@ -27,11 +27,12 @@ jobs:
           version: v2.10.1
       - if: runner.os != 'Linux'
         run: go test -race ./...
-      # Coverage is enforced on Linux, which has the pseudo-terminals the prompt tests need. cmd/ is
+      # Coverage is enforced on Linux, which has the pseudo-terminals the prompt tests need. Those skip
+      # under -race, which bubbletea's input reader trips on exit, so this run goes without it. cmd/ is
       # left out: main only wires signals to cli.Main, which the tests drive directly.
       - if: runner.os == 'Linux'
         run: |
-          go test -race -coverpkg=./cveservices/...,./internal/... -coverprofile=cover.out ./...
+          go test -coverpkg=./cveservices/...,./internal/... -coverprofile=cover.out ./...
           go tool cover -func=cover.out | tail -1 | grep -q '100.0%' || {
             go tool cover -func=cover.out | grep -v '100.0%'
             exit 1

@@ -1211,8 +1211,15 @@ func startTerminal(t *testing.T, args ...string) *terminal {
 	return startTerminalContext(t, context.Background(), args...)
 }
 
+// raceEnabled is set by race_test.go.
+var raceEnabled bool
+
 func startTerminalContext(t *testing.T, ctx context.Context, args ...string) *terminal {
 	t.Helper()
+	if raceEnabled {
+		// muesli/cancelreader v0.2.2 closes its pipe while its reader still uses it, on every exit.
+		t.Skip("bubbletea's input reader races on exit; CI runs these without -race")
+	}
 	ptmx, tty, err := pty.Open()
 	if err != nil {
 		t.Skipf("no pseudo-terminal: %v", err)
@@ -1234,10 +1241,8 @@ func startTerminalContext(t *testing.T, ctx context.Context, args ...string) *te
 			}
 		}
 	}()
-	go func() {
-		term.code <- cli.Main(ctx, args, tty, tty, tty)
-		_ = tty.Close()
-	}()
+	// tty stays open: bubbletea's input reader may still touch it after cli.Main returns.
+	go func() { term.code <- cli.Main(ctx, args, tty, tty, tty) }()
 	return term
 }
 

@@ -11,7 +11,13 @@ In a terminal, `cvedex` asks for:
 - **Your username**, usually your email.
 - **Your API key.**
 
-It checks them against the server, then saves them to `~/.config/cvedex/config.json`, readable by you only.
+It checks them against the server, then saves them:
+
+- **The API key** goes in your system keychain: the macOS Keychain, the Secret Service on Linux (GNOME Keyring or KWallet), or the Windows Credential Manager.
+- **The rest** goes in `~/.config/cvedex/config.json`, readable by you only.
+
+!!! info "No keychain, such as on a server"
+    If there is no keychain to use, `login` says so and puts the key in `config.json` too. On a server, you may prefer the [environment variables](#environment-variables).
 
 Run `cvedex status` to see where you are logged in:
 

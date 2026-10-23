@@ -27,7 +27,7 @@ type Credentials struct {
 	URL  string `json:"url"`
 	Org  string `json:"org"`
 	User string `json:"user"`
-	Key  string `json:"key"`
+	Key  string `json:"key,omitempty"`
 }
 
 // Client calls CVE Services with one set of credentials.

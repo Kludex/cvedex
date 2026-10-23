@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
+	"github.com/zalando/go-keyring"
 
 	"github.com/Kludex/cvedex/cveservices"
 	"github.com/Kludex/cvedex/internal/cassette"
@@ -840,31 +842,77 @@ func TestCommands(t *testing.T) {
 	}
 }
 
+func TestMain(m *testing.M) {
+	keyring.MockInit()
+	os.Exit(m.Run())
+}
+
 func TestLogin(t *testing.T) {
 	user := cassette.Load(t, "user")
 	user.User = "alice@acme.test"
-	url := cassette.Serve(t, user)
-	got := run(t, url, "the-key\n", "login", "--org", "acme", "--user", "alice@acme.test")
-	if got.code != 0 {
-		t.Fatalf("exit code %d: %s", got.code, got.stderr)
+	for _, tt := range []struct {
+		name     string
+		keychain error
+		saved    string
+		inFile   bool
+	}{
+		{name: "keychain", saved: "with the API key in the system keychain"},
+		{name: "no keychain", keychain: errors.New("no keychain"), saved: "There is no system keychain",
+			inFile: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.keychain != nil {
+				keyring.MockInitWithError(tt.keychain)
+				t.Cleanup(keyring.MockInit)
+			}
+			url := cassette.Serve(t, user, cassette.Load(t, "cve-id-list"))
+			got := run(t, url, "the-key\n", "login", "--org", "acme", "--user", "alice@acme.test")
+			if got.code != 0 {
+				t.Fatalf("exit code %d: %s", got.code, got.stderr)
+			}
+			if want := "Logged in to " + url + " as alice@acme.test (acme, ADMIN)"; !strings.Contains(got.stdout, want) ||
+				!strings.Contains(got.stdout, tt.saved) {
+				t.Errorf("stdout: %s", got.stdout)
+			}
+			path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "cvedex", "config.json")
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode().Perm() != 0o600 {
+				t.Errorf("config mode %v, want 0600", info.Mode().Perm())
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), `"key": "the-key"`) != tt.inFile {
+				t.Errorf("config: %s", data)
+			}
+
+			t.Setenv("CVE_API_KEY", "")
+			var stdout, stderr bytes.Buffer
+			if code := cli.Main(context.Background(), []string{"list"}, strings.NewReader(""), &stdout,
+				&stderr); code != 0 || !strings.Contains(stdout.String(), "CVE-2026-1100") {
+				t.Errorf("list with the saved key: exit code %d, %s%s", code, stdout.String(), stderr.String())
+			}
+		})
 	}
-	if !strings.Contains(got.stdout, "Logged in to "+url+" as alice@acme.test (acme, ADMIN)") {
-		t.Errorf("stdout: %s", got.stdout)
-	}
-	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "cvedex", "config.json")
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("config mode %v, want 0600", info.Mode().Perm())
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"key": "the-key"`) {
-		t.Errorf("config: %s", data)
+}
+
+func TestKeychainUnreadable(t *testing.T) {
+	keyring.MockInitWithError(errors.New("keychain is locked"))
+	t.Cleanup(keyring.MockInit)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CVE_API_URL", "https://cve.example")
+	t.Setenv("CVE_API_ORG", "acme")
+	t.Setenv("CVE_API_USER", "alice@acme.test")
+	t.Setenv("CVE_API_KEY", "")
+	var stdout, stderr bytes.Buffer
+	code := cli.Main(context.Background(), []string{"list"}, strings.NewReader(""), &stdout, &stderr)
+	if want := "reading your API key from the system keychain: keychain is locked"; code != 1 ||
+		!strings.Contains(stderr.String(), want) {
+		t.Errorf("exit code %d, stderr %q; want 1 and %q", code, stderr.String(), want)
 	}
 }
 

@@ -49,7 +49,7 @@ internal/
   tui/                bubbletea
   mcpserver/          MCP tools on the official go-sdk
   render/             lipgloss tables and the record summary
-  config/             ~/.config/cvedex/config.json and env overrides
+  config/             ~/.config/cvedex/config.json, the key in the OS keychain, and env overrides
   cassette/           test server replaying testdata/recorded/
 ```
 
@@ -57,7 +57,7 @@ Records pass through as `json.RawMessage`: CVE Services validates them, and the 
 
 ### Config
 
-`~/.config/cvedex/config.json` written by `cvedex login`, overridden by `CVE_API_URL`, `CVE_API_ORG`, `CVE_API_USER`, `CVE_API_KEY`. These are the names `cvelib` uses, so existing CNA setups work with no changes.
+`~/.config/cvedex/config.json` written by `cvedex login`, with the API key in the OS keychain through `zalando/go-keyring` (stored under service `cvedex`, account `<user> on <url>`), or in the `0600` file when there is no keychain. Overridden by `CVE_API_URL`, `CVE_API_ORG`, `CVE_API_USER`, `CVE_API_KEY`. These are the names `cvelib` uses, so existing CNA setups work with no changes.
 
 ### CLI
 
@@ -163,7 +163,7 @@ A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|sub
 
 ## Dependencies
 
-- `cvedex`: `net/http` with redirects disabled, so the key never follows a redirect. `cobra` for commands, Charm's `bubbletea`, `bubbles`, `lipgloss` and `huh` for the TUI, output and prompts, `modelcontextprotocol/go-sdk` for MCP.
+- `cvedex`: `net/http` with redirects disabled, so the key never follows a redirect. `cobra` for commands, Charm's `bubbletea`, `bubbles`, `lipgloss` and `huh` for the TUI, output and prompts, `modelcontextprotocol/go-sdk` for MCP, `zalando/go-keyring` for the key (pure Go, so static builds keep working).
 - `cvedexd`: `hono`, `wrangler`. Tooling per the TypeScript rules: oxlint, oxc-format, `strict: true`.
 
 ## Phases
@@ -203,7 +203,7 @@ User docs live in `docs/`, built with [Zensical](https://zensical.org). Preview 
 
 - CVE JSON 5.x schema validation client-side. Upstream validates; errors are shown verbatim.
 - Per-CNA-user reservation quotas. Submitters have `MAX_OPEN_IDS`.
-- A Windows install script, and storing the key in the OS keychain. The config file is `0600`; a keychain is worth it once someone asks.
+- A Windows install script. The release zip and `gh attestation verify` cover it.
 - MCP elicitation. The proposal queue covers approval for all clients.
 - Multiple CNA orgs per `cvedexd`.
 - Caching the upstream credential check. One extra upstream call per CNA-user request; cache when it hurts.

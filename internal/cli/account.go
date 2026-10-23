@@ -66,11 +66,16 @@ func (a *app) loginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := config.Save(a.configPath, creds); err != nil {
+			inKeychain, err := config.Save(a.configPath, creds)
+			if err != nil {
 				return err
 			}
+			saved := "Saved to " + a.configPath + ", with the API key in the system keychain"
+			if !inKeychain {
+				saved = "Saved to " + a.configPath + ". There is no system keychain, so the API key is in that file"
+			}
 			a.print(render.Good.Render("Logged in") + " to " + creds.URL + " as " + render.Bold.Render(creds.User) +
-				" (" + creds.Org + roles(me.Authority) + role + ").\n" + render.Faint.Render("Saved to "+a.configPath))
+				" (" + creds.Org + roles(me.Authority) + role + ").\n" + render.Faint.Render(saved))
 			return nil
 		},
 	}

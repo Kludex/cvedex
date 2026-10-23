@@ -69,7 +69,11 @@ cve.get("/cve-id", async (c) => {
   if (a.kind === "cna_user") {
     return forward(c, a.headers);
   }
-  const { state, cve_id_year: year } = c.req.query();
+  const query = c.req.query();
+  const { state, cve_id_year: year } = query;
+  const within = (time: string, field: string) =>
+    (!query[`${field}.gt`] || Date.parse(time) > Date.parse(query[`${field}.gt`]!)) &&
+    (!query[`${field}.lt`] || Date.parse(time) < Date.parse(query[`${field}.lt`]!));
   const { results } = await c.env.DB.prepare(
     "SELECT * FROM cves WHERE submitter_id = ? ORDER BY cve_id",
   )
@@ -77,7 +81,13 @@ cve.get("/cve-id", async (c) => {
     .all<CveRow>();
   const ids = results
     .map((row) => cveId(c, row, a.name))
-    .filter((id) => (!state || id.state === state) && (!year || id.cve_year === year));
+    .filter(
+      (id) =>
+        (!state || id.state === state) &&
+        (!year || id.cve_year === year) &&
+        within(id.time.created, "time_reserved") &&
+        within(id.time.modified, "time_modified"),
+    );
   return c.json({
     totalCount: ids.length,
     itemsPerPage: ids.length,

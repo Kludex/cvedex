@@ -162,6 +162,11 @@ describe("submitters", () => {
     expect(await list("state=RESERVED&cve_id_year=2026")).toEqual([id]);
     expect(await list("state=PUBLISHED")).toEqual([]);
     expect(await list("cve_id_year=2025")).toEqual([]);
+    expect(
+      await list("time_reserved.gt=2000-01-01T00:00:00Z&time_modified.lt=2999-01-01T00:00:00Z"),
+    ).toEqual([id]);
+    expect(await list("time_reserved.lt=2000-01-01T00:00:00Z")).toEqual([]);
+    expect(await list("time_modified.gt=2999-01-01T00:00:00Z")).toEqual([]);
   });
 
   it("get upstream reservation errors verbatim and own nothing", async () => {

@@ -276,7 +276,7 @@ describe("submitters", () => {
     });
     expect(await disabled.json()).toMatchObject({ id: bob.id, disabled_at: expect.any(String) });
     const refused = await api("/api/cve-id", { headers: bob.headers });
-    expect(refused.status).toBe(403);
+    expect(refused.status).toBe(401);
     const decided = await env.DB.prepare("SELECT status FROM proposals WHERE id = ?")
       .bind(proposal_id)
       .first();
@@ -321,7 +321,12 @@ describe("submitters", () => {
       headers: bob.headers,
     });
     expect(await revoked.json()).toMatchObject({ kind: "agent", revoked_at: expect.any(String) });
-    expect((await api("/api/cve-id", { headers: agent.headers })).status).toBe(403);
+    const refused = await api("/api/cve-id", { headers: agent.headers });
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toEqual({
+      error: "UNAUTHORIZED",
+      message: "This token is unknown, revoked, or its submitter is disabled",
+    });
     const decided = await env.DB.prepare("SELECT status FROM proposals WHERE id = ?")
       .bind(proposal_id)
       .first();
@@ -333,7 +338,7 @@ describe("submitters", () => {
       headers: alice,
     });
     expect(byCna.status).toBe(200);
-    expect((await api("/api/cve-id", { headers: bob.headers })).status).toBe(403);
+    expect((await api("/api/cve-id", { headers: bob.headers })).status).toBe(401);
   });
 
   it("cannot create submitters", async () => {

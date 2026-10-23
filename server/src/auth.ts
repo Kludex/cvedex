@@ -35,6 +35,12 @@ export const authenticate = createMiddleware<AppEnv>(async (c, next) => {
     });
     return next();
   }
+  if (headers["CVE-API-KEY"].startsWith("cvedexd_")) {
+    throw refuse(
+      c,
+      fail(401, "UNAUTHORIZED", "This token is unknown, revoked, or its submitter is disabled"),
+    );
+  }
   if (!headers["CVE-API-ORG"]) {
     throw refuse(c, fail(401, "UNAUTHORIZED", "CVE-API-ORG header is required"));
   }

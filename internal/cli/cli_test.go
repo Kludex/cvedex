@@ -247,7 +247,7 @@ func TestCommands(t *testing.T) {
 			name:   "publish a missing file",
 			args:   []string{"publish", "CVE-2026-1100", filepath.Join(dir, "missing.json")},
 			code:   1,
-			stderr: []string{"no such file"},
+			stderr: []string{"missing.json"},
 		},
 		{
 			name:   "publish on production without a terminal",
@@ -337,7 +337,7 @@ func TestCommands(t *testing.T) {
 		{name: "adp a file that is not JSON", args: []string{"adp", "CVE-2026-1108", broken}, code: 1,
 			stderr: []string{"broken.json is not a JSON object"}},
 		{name: "adp a missing file", args: []string{"adp", "CVE-2026-1108", filepath.Join(dir, "missing.json")},
-			code: 1, stderr: []string{"no such file"}},
+			code: 1, stderr: []string{"missing.json"}},
 		{
 			name:      "org",
 			exchanges: []cassette.Exchange{cassette.Load(t, "org")},
@@ -885,7 +885,7 @@ func TestLogin(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if info.Mode().Perm() != 0o600 {
+			if info.Mode().Perm() != 0o600 && runtime.GOOS != "windows" {
 				t.Errorf("config mode %v, want 0600", info.Mode().Perm())
 			}
 			data, err := os.ReadFile(path)
@@ -1243,10 +1243,25 @@ func startTerminalContext(t *testing.T, ctx context.Context, args ...string) *te
 
 func (term *terminal) waitFor(text string) {
 	term.t.Helper()
+	term.waitAfter(0, text)
+}
+
+// answer sends keys, then waits for text among what the terminal shows from then on.
+func (term *terminal) answer(keys, text string) {
+	term.t.Helper()
+	term.mu.Lock()
+	at := term.screen.Len()
+	term.mu.Unlock()
+	term.send(keys)
+	term.waitAfter(at, text)
+}
+
+func (term *terminal) waitAfter(at int, text string) {
+	term.t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		term.mu.Lock()
-		screen := ansi.Strip(term.screen.String())
+		screen := ansi.Strip(term.screen.String()[at:])
 		term.mu.Unlock()
 		if strings.Contains(screen, text) {
 			return
@@ -1292,18 +1307,15 @@ func TestLoginForm(t *testing.T) {
 	loggedOut(t, url)
 	term := startTerminal(t, "login")
 	term.waitFor("> Another server")
-	term.send("\r")
-	term.waitFor("Server URL")
-	time.Sleep(200 * time.Millisecond)
-	term.send("\x15http://cve.example\r")
-	term.waitFor("use https://")
-	term.send("\x15" + url)
-	// huh moves focus asynchronously, so each answer waits for the previous one to land.
-	for _, answer := range []string{"", "", " acme", "alice@acme.test ", "the-key"} {
-		time.Sleep(200 * time.Millisecond)
-		term.send(answer + "\r")
-	}
-	term.waitFor("required")
+	// huh moves focus asynchronously, so each answer waits for the next group or empty field to show.
+	const focused = "┃ >  "
+	term.answer("\r", "Server URL")
+	term.answer("\x15http://cve.example\r", "use https://")
+	term.answer("\x15"+url+"\r", "CNA short name")
+	term.answer("\r", "required")
+	term.answer(" acme\r", focused)
+	term.answer("alice@acme.test \r", focused)
+	term.send("the-key\r")
 	term.waitFor("Logged in to " + url + " as alice@acme.test (acme, ADMIN)")
 	term.exits(0)
 }

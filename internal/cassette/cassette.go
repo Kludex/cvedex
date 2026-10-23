@@ -100,7 +100,7 @@ func Serve(t testing.TB, exchanges ...Exchange) string {
 		server.Close()
 		mu.Lock()
 		defer mu.Unlock()
-		if next < len(exchanges) {
+		if next < len(exchanges) && !t.Skipped() {
 			t.Errorf("%d of %d expected requests were never made", len(exchanges)-next, len(exchanges))
 		}
 	})

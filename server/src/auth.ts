@@ -15,14 +15,15 @@ export const authenticate = createMiddleware<AppEnv>(async (c, next) => {
     "CVE-API-KEY": c.req.header("CVE-API-KEY") ?? "",
   };
   if (!headers["CVE-API-USER"] || !headers["CVE-API-KEY"]) {
-    throw fail(401, "UNAUTHORIZED", "CVE-API-USER and CVE-API-KEY headers are required");
+    throw refuse(c, fail(401, "UNAUTHORIZED", "CVE-API-USER and CVE-API-KEY headers are required"));
   }
   const token = await c.env.DB.prepare(
-    `SELECT tokens.id, tokens.kind, submitters.id AS submitter_id FROM tokens
-     JOIN submitters ON submitters.id = tokens.submitter_id
-     WHERE submitters.name = ? AND tokens.token_sha256 = ?`,
+    `UPDATE tokens SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE token_sha256 = ? AND revoked_at IS NULL
+     AND submitter_id = (SELECT id FROM submitters WHERE name = ? AND disabled_at IS NULL)
+     RETURNING id, kind, submitter_id`,
   )
-    .bind(headers["CVE-API-USER"], await sha256(headers["CVE-API-KEY"]))
+    .bind(await sha256(headers["CVE-API-KEY"]), headers["CVE-API-USER"])
     .first<{ id: number; kind: "user" | "agent"; submitter_id: number }>();
   if (token) {
     const kind = token.kind === "agent" ? "agent" : "submitter";
@@ -35,13 +36,20 @@ export const authenticate = createMiddleware<AppEnv>(async (c, next) => {
     return next();
   }
   if (!headers["CVE-API-ORG"]) {
-    throw fail(401, "UNAUTHORIZED", "CVE-API-ORG header is required");
+    throw refuse(c, fail(401, "UNAUTHORIZED", "CVE-API-ORG header is required"));
+  }
+  if (headers["CVE-API-ORG"] !== c.env.CVE_API_ORG) {
+    throw refuse(c, fail(403, "NOT_ALLOWED", `This cvedexd serves ${c.env.CVE_API_ORG} only`));
+  }
+  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+  if (!(await c.env.AUTH_LIMITER.limit({ key: ip })).success) {
+    throw refuse(c, fail(429, "RATE_LIMITED", "Too many sign-ins, try again in a minute"));
   }
   const org = encodeURIComponent(headers["CVE-API-ORG"]);
   const user = encodeURIComponent(headers["CVE-API-USER"]);
   const check = await upstream(c, headers, "GET", `/api/org/${org}/user/${user}`);
   if (!check.ok) {
-    throw new HTTPException(check.status as 401, { res: check });
+    throw refuse(c, new HTTPException(check.status as 401, { res: check }));
   }
   c.set("actor", { kind: "cna_user", name: headers["CVE-API-USER"], headers });
   return next();
@@ -67,8 +75,29 @@ export function submitter(c: AppContext): Submitter {
   return a;
 }
 
-export function fail(status: 400 | 401 | 403 | 404 | 409, error: string, message: string) {
+export function fail(
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 429,
+  error: string,
+  message: string,
+) {
   return new HTTPException(status, { res: Response.json({ error, message }, { status }) });
+}
+
+/** Logs a refused sign-in to Workers Logs. The audit table holds authenticated requests only. */
+function refuse(c: AppContext, err: HTTPException): HTTPException {
+  const url = new URL(c.req.url);
+  console.warn(
+    JSON.stringify({
+      event: "sign_in_refused",
+      status: err.status,
+      user: c.req.header("CVE-API-USER") ?? null,
+      org: c.req.header("CVE-API-ORG") ?? null,
+      ip: c.req.header("CF-Connecting-IP") ?? null,
+      method: c.req.method,
+      path: url.pathname + url.search,
+    }),
+  );
+  return err;
 }
 
 export async function sha256(text: string): Promise<string> {

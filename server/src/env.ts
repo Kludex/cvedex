@@ -21,6 +21,9 @@ export type Env = {
   CVE_API_USER: string;
   CVE_API_KEY: string;
   VERSION: string;
+  MAX_OPEN_IDS: string;
+  WEBHOOK_URL?: string;
+  AUTH_LIMITER: RateLimit;
   REPLAY?: Replay;
 };
 

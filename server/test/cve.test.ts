@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { env } from "cloudflare:workers";
+import { describe, expect, it, vi } from "vitest";
 import published from "../../testdata/recorded/cve-2025-0001.json";
 import recordDne from "../../testdata/recorded/cve-record-dne.json";
 import {
@@ -114,19 +115,64 @@ describe("submitters", () => {
       owning_cna: "acme",
       state: "RESERVED",
       requested_by: { cna: "acme", user: bob.headers["CVE-API-USER"] },
-      cvedexd: { state: "reserved", note: null },
+      cvedexd: { state: "reserved", note: null, revision: 0 },
     });
+  });
+
+  it("reserve a positive amount within their open ID limit", async () => {
+    const bob = await createSubmitter();
+    const calls = mockUpstream();
+    const none = await api("/api/cve-id?amount=0", { method: "POST", headers: bob.headers });
+    expect(none.status).toBe(400);
+    const many = await api("/api/cve-id?amount=11", { method: "POST", headers: bob.headers });
+    expect(many.status).toBe(403);
+    expect(await many.json()).toEqual({
+      error: "EXCEEDED_ID_QUOTA",
+      message: "You hold 0 unpublished IDs and may hold 10. Publish or reject some first",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("are told which reserved IDs could not be recorded", async () => {
+    const bob = await createSubmitter();
+    const carol = await createSubmitter();
+    const id = await reserveAs(bob);
+    mockUpstream({
+      method: "POST",
+      path: "/api/cve-id?amount=1&short_name=acme",
+      body: reserved(id),
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await api("/api/cve-id?amount=1", { method: "POST", headers: carol.headers });
+    expect(res.status).toBe(500);
+    expect(JSON.parse(error.mock.calls[0]![0] as string)).toEqual({
+      event: "reservation_not_recorded",
+      submitter: carol.headers["CVE-API-USER"],
+      ids: [id],
+    });
+  });
+
+  it("filter their IDs by state and year", async () => {
+    const bob = await createSubmitter();
+    const id = await reserveAs(bob);
+    const list = async (query: string) => {
+      const res = await api(`/api/cve-id?${query}`, { headers: bob.headers });
+      return (await res.json<{ cve_ids: { cve_id: string }[] }>()).cve_ids.map((c) => c.cve_id);
+    };
+    expect(await list("state=RESERVED&cve_id_year=2026")).toEqual([id]);
+    expect(await list("state=PUBLISHED")).toEqual([]);
+    expect(await list("cve_id_year=2025")).toEqual([]);
   });
 
   it("get upstream reservation errors verbatim and own nothing", async () => {
     const bob = await createSubmitter();
     mockUpstream({
       method: "POST",
-      path: "/api/cve-id?amount=0&short_name=acme",
+      path: "/api/cve-id?amount=1&short_name=acme",
       status: 400,
       body: badRequest,
     });
-    const res = await api("/api/cve-id?amount=0", { method: "POST", headers: bob.headers });
+    const res = await api("/api/cve-id?amount=1", { method: "POST", headers: bob.headers });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual(badRequest);
     const list = await api("/api/cve-id", { headers: bob.headers });
@@ -155,6 +201,7 @@ describe("submitters", () => {
     expect(await res.json()).toEqual({
       message: `${id} was submitted for review`,
       state: "in_review",
+      revision: 1,
     });
     expect(calls).toEqual([]);
 
@@ -189,6 +236,83 @@ describe("submitters", () => {
     const res = await api(`/api/cve/${id}`, { headers: carol.headers });
     expect(res.status).toBe(404);
     expect(calls[0]?.headers.has("CVE-API-KEY")).toBe(false);
+  });
+
+  it("ask for an ID to be rejected, and cannot change it once rejected", async () => {
+    const bob = await createSubmitter();
+    const id = await reserveAs(bob);
+    const reasons = { cnaContainer: { rejectedReasons: [{ lang: "en", value: "Duplicate" }] } };
+    const res = await api(`/api/cve/${id}/reject`, {
+      method: "POST",
+      headers: bob.headers,
+      body: reasons,
+    });
+    expect(await res.json()).toMatchObject({ state: "in_review", revision: 1 });
+    const calls = mockUpstream(aliceCheck, {
+      method: "POST",
+      path: `/api/cve/${id}/reject`,
+      body: publish,
+    });
+    const approved = await api(`/api/cvedexd/cve/${id}/approve`, {
+      method: "POST",
+      headers: alice,
+      body: { revision: 1 },
+    });
+    expect(approved.status).toBe(200);
+    expect(JSON.parse(calls[1]!.body)).toEqual(reasons);
+    const state = await api(`/api/cve-id/${id}`, { headers: bob.headers });
+    expect(await state.json()).toMatchObject({ state: "REJECTED", cvedexd: { state: "rejected" } });
+    const again = await api(`/api/cve/${id}/cna`, {
+      method: "POST",
+      headers: bob.headers,
+      body: record,
+    });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toEqual({
+      error: "BAD_STATE",
+      message: `${id} is rejected and cannot change now`,
+    });
+  });
+
+  it("see what CNA users do to their IDs directly", async () => {
+    const bob = await createSubmitter();
+    const id = await reserveAs(bob);
+    const state = async () => {
+      const res = await api(`/api/cve-id/${id}`, { headers: bob.headers });
+      return (await res.json<{ state: string }>()).state;
+    };
+    mockUpstream(
+      aliceCheck,
+      { method: "POST", path: `/api/cve/${id}/cna`, body: publish },
+      { method: "PUT", path: `/api/cve/${id}/reject`, body: publish },
+      { method: "PUT", path: `/api/cve-id/${id}?state=RESERVED`, body: {} },
+      { method: "PUT", path: `/api/cve-id/${id}?state=REJECTED`, body: {} },
+      { method: "PUT", path: `/api/cve-id/${id}?org=other`, body: {} },
+    );
+    await api(`/api/cve/${id}/cna`, { method: "POST", headers: alice, body: record });
+    expect(await state()).toBe("PUBLISHED");
+    await api(`/api/cve/${id}/reject`, { method: "PUT", headers: alice, body: record });
+    expect(await state()).toBe("REJECTED");
+    await api(`/api/cve-id/${id}?state=RESERVED`, { method: "PUT", headers: alice });
+    expect(await state()).toBe("RESERVED");
+    await api(`/api/cve-id/${id}?state=REJECTED`, { method: "PUT", headers: alice });
+    expect(await state()).toBe("REJECTED");
+    await api(`/api/cve-id/${id}?org=other`, { method: "PUT", headers: alice });
+    expect(await state()).toBe("REJECTED");
+    const revisions = await env.DB.prepare(
+      "SELECT revision, action FROM revisions WHERE cve_id = ? ORDER BY revision",
+    )
+      .bind(id)
+      .all();
+    expect(revisions.results).toEqual([
+      { revision: 1, action: "publish" },
+      { revision: 2, action: "reject" },
+    ]);
+    const refused = await api(`/api/cve-id/${id}?state=RESERVED`, {
+      method: "PUT",
+      headers: bob.headers,
+    });
+    expect(refused.status).toBe(403);
   });
 
   it("are refused everything else", async () => {

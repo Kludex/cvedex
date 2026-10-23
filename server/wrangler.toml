@@ -4,10 +4,19 @@ compatibility_date = "2026-10-01"
 
 # Secrets, set with `wrangler secret put`:
 #   CVE_API_ORG, CVE_API_USER, CVE_API_KEY: the service account that reserves IDs for submitters.
+#   WEBHOOK_URL (optional): a Slack-compatible incoming webhook told about reviews and proposals.
 
 [vars]
 CVE_API_URL = "https://cveawg.mitre.org"
 VERSION = "0.1.0"
+# How many unpublished IDs one submitter may hold at a time.
+MAX_OPEN_IDS = "10"
+
+# Sign-ins that CVE Services has to check, per client IP.
+[[ratelimits]]
+name = "AUTH_LIMITER"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
 
 [[d1_databases]]
 binding = "DB"

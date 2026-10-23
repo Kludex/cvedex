@@ -7,6 +7,8 @@ import reserveCassette from "../../testdata/recorded/reserve.json";
 import userCassette from "../../testdata/recorded/user.json";
 
 export type Upstream = {
+  /** A full URL, for requests that do not go to CVE Services. */
+  url?: string;
   method: string;
   path: string;
   status?: number;
@@ -50,8 +52,12 @@ export function mockUpstream(...routes: Upstream[]): Call[] {
       headers: request.headers,
       body: await request.text(),
     });
-    const route = routes.find((r) => r.method === request.method && r.path === path);
-    if (!route || url.origin !== "https://cveawg.test") {
+    const route = routes.find(
+      (r) =>
+        r.method === request.method &&
+        (r.url ? r.url === request.url : url.origin === "https://cveawg.test" && r.path === path),
+    );
+    if (!route) {
       throw new Error(`unexpected upstream request: ${request.method} ${request.url}`);
     }
     const reply = { status: route.status ?? 200, headers: route.headers ?? {} };
@@ -70,6 +76,8 @@ export const alice = {
 
 export const aliceCheck: Upstream = cassette(userCassette);
 
+let client = 0;
+
 export function api(
   path: string,
   init: { method?: string; headers?: Record<string, string>; body?: unknown } = {},
@@ -81,7 +89,7 @@ export function api(
   return exports.default.fetch(
     new Request(`https://cvedexd.test${path}`, {
       method: init.method ?? "GET",
-      headers: init.headers ?? {},
+      headers: { "CF-Connecting-IP": `10.0.0.${++client}`, ...init.headers },
       body,
     }),
   );

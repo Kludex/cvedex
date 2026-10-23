@@ -65,6 +65,7 @@ Covers the CVE Services surface a CNA uses day to day:
 
 ```
 cvedex login [--test]                         prompts in a terminal; --org --user and the key on stdin otherwise
+cvedex logout                                 deletes the config and the keychain entry
 cvedex status                                 server, user, CNA (alias: ping, whoami)
 cvedex reserve [--year 2026] [-n 1] [--sequential]
 cvedex list [--state s] [--year y] [--reserved-after/-before t] [--modified-after/-before t]

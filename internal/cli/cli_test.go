@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,6 +40,11 @@ func run(t *testing.T, url, stdin string, args ...string) result {
 	t.Setenv("CVE_API_ORG", "acme")
 	t.Setenv("CVE_API_USER", "alice@acme.test")
 	t.Setenv("CVE_API_KEY", "key")
+	return rerun(stdin, args...)
+}
+
+// rerun runs cvedex in the environment of the previous run, to see what it saved.
+func rerun(stdin string, args ...string) result {
 	var stdout, stderr bytes.Buffer
 	code := cli.Main(context.Background(), args, strings.NewReader(stdin), &stdout, &stderr)
 	return result{stdout.String(), stderr.String(), code}
@@ -896,7 +902,44 @@ func TestLogin(t *testing.T) {
 				&stderr); code != 0 || !strings.Contains(stdout.String(), "CVE-2026-1100") {
 				t.Errorf("list with the saved key: exit code %d, %s%s", code, stdout.String(), stderr.String())
 			}
+
+			for _, want := range []string{"Logged out of " + url + " as alice@acme.test.", "You were not logged in."} {
+				if got := rerun("", "logout"); got.code != 0 || !strings.Contains(got.stdout, want) {
+					t.Errorf("logout: exit code %d, %s%s; want %q", got.code, got.stdout, got.stderr, want)
+				}
+			}
+			if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("config still there: %v", err)
+			}
+			if _, err := keyring.Get("cvedex", "alice@acme.test on "+url); tt.keychain == nil &&
+				!errors.Is(err, keyring.ErrNotFound) {
+				t.Errorf("key still in the keychain: %v", err)
+			}
 		})
+	}
+}
+
+func TestLoginElsewhere(t *testing.T) {
+	user := cassette.Load(t, "user")
+	user.User = "alice@acme.test"
+	first, second := cassette.Serve(t, user), cassette.Serve(t, user)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, url := range []string{first, second} {
+		var stdout, stderr bytes.Buffer
+		args := []string{"--url", url, "login", "--org", "acme", "--user", "alice@acme.test"}
+		if code := cli.Main(context.Background(), args, strings.NewReader("the-key\n"), &stdout, &stderr); code != 0 {
+			t.Fatalf("login to %s: exit code %d, %s", url, code, stderr.String())
+		}
+	}
+	if _, err := keyring.Get("cvedex", "alice@acme.test on "+first); !errors.Is(err, keyring.ErrNotFound) {
+		t.Errorf("the key for %s is still in the keychain: %v", first, err)
+	}
+	if key, err := keyring.Get("cvedex", "alice@acme.test on "+second); key != "the-key" {
+		t.Errorf("the key for %s is %q, %v", second, key, err)
+	}
+	got := rerun("", "logout", "--json")
+	if want := `"user": "alice@acme.test"`; !strings.Contains(got.stdout, want) || strings.Contains(got.stdout, "key") {
+		t.Errorf("logout --json: %s", got.stdout)
 	}
 }
 
@@ -913,6 +956,19 @@ func TestKeychainUnreadable(t *testing.T) {
 	if want := "reading your API key from the system keychain: keychain is locked"; code != 1 ||
 		!strings.Contains(stderr.String(), want) {
 		t.Errorf("exit code %d, stderr %q; want 1 and %q", code, stderr.String(), want)
+	}
+
+	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "cvedex", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"url":"https://cve.example","user":"alice@acme.test"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := rerun("", "logout")
+	if want := "removing your API key from the system keychain: keychain is locked"; got.code != 1 ||
+		!strings.Contains(got.stderr, want) {
+		t.Errorf("logout: exit code %d, stderr %q; want 1 and %q", got.code, got.stderr, want)
 	}
 }
 

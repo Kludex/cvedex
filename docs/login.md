@@ -82,6 +82,18 @@ These override the saved config, one by one:
 
 They are the names [`cvelib`](https://github.com/RedHatProductSecurity/cvelib) uses, so an existing setup works as is.
 
+## Log out
+
+```console
+$ cvedex logout
+Logged out of https://cveawg-test.mitre.org as alice@acme.org.
+```
+
+`logout` deletes `config.json` and the API key in your keychain. Logging in as someone else, or to another server, also removes the previous key from the keychain, so old keys do not pile up.
+
+!!! note "Environment variables still apply"
+    `logout` only forgets what `login` saved. If `CVE_API_*` variables are set, `cvedex` keeps using them.
+
 ## Rate limits
 
 When CVE Services answers `429 Too Many Requests`, `cvedex` waits as long as its `Retry-After` header says, up to a minute, and tries again, three times at most.

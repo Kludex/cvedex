@@ -165,6 +165,29 @@ func roles(auth cveservices.Authority) string {
 	return ", " + strings.Join(auth.ActiveRoles, ", ")
 }
 
+func (a *app) logoutCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:         "logout",
+		Short:       "Forget the saved credentials, the API key in the system keychain included",
+		Annotations: noAuth,
+		GroupID:     groupStart,
+		Args:        cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			creds, err := config.Remove(a.configPath)
+			if err != nil {
+				return err
+			}
+			creds.Key = ""
+			return a.output(creds, func() string {
+				if creds.User == "" {
+					return "You were not logged in."
+				}
+				return render.Good.Render("Logged out") + " of " + creds.URL + " as " + render.Bold.Render(creds.User) + "."
+			})
+		},
+	}
+}
+
 func (a *app) statusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:         "status",

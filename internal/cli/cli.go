@@ -77,7 +77,7 @@ func (a *app) root() *cobra.Command {
 		&cobra.Group{ID: groupCvedexd, Title: "cvedexd policy server:"},
 		&cobra.Group{ID: groupTools, Title: "Interfaces:"},
 	)
-	root.AddCommand(a.loginCommand(), a.statusCommand())
+	root.AddCommand(a.loginCommand(), a.logoutCommand(), a.statusCommand())
 	root.AddCommand(a.recordCommands()...)
 	root.AddCommand(a.orgCommand())
 	root.AddCommand(a.cvedexdCommands()...)
@@ -106,16 +106,23 @@ func (a *app) connect(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	needsAuth := true
+	for c := cmd; c != nil; c = c.Parent() {
+		needsAuth = needsAuth && c.Annotations[annotationNoAuth] == ""
+	}
+	if creds.Key == "" && creds.User != "" {
+		key, err := config.Key(creds)
+		if err != nil && needsAuth {
+			return err
+		}
+		creds.Key = key
+	}
 	if a.url != "" {
 		creds.URL = a.url
 	}
 	a.configPath, a.client = path, cveservices.New(creds)
 	if err := checkURL(a.client.Credentials.URL); err != nil {
 		return err
-	}
-	needsAuth := true
-	for c := cmd; c != nil; c = c.Parent() {
-		needsAuth = needsAuth && c.Annotations[annotationNoAuth] == ""
 	}
 	if needsAuth && (creds.Org == "" || creds.User == "" || creds.Key == "") {
 		return errNotLoggedIn

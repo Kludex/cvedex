@@ -31,18 +31,12 @@ func Path() (string, error) {
 	return filepath.Join(home, ".config", "cvedex", "config.json"), nil
 }
 
-// Load reads the config file at path if there is one, then applies the environment overrides.
+// Load reads the config file at path if there is one, then applies the environment overrides. The
+// API key may still be in the keychain: see Key.
 func Load(path string) (cveservices.Credentials, error) {
-	var creds cveservices.Credentials
-	data, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-	case err != nil:
+	creds, err := read(path)
+	if err != nil {
 		return creds, err
-	default:
-		if err := json.Unmarshal(data, &creds); err != nil {
-			return creds, fmt.Errorf("%s: %w", path, err)
-		}
 	}
 	for env, field := range map[string]*string{
 		"CVE_API_URL":  &creds.URL,
@@ -54,19 +48,24 @@ func Load(path string) (cveservices.Credentials, error) {
 			*field = value
 		}
 	}
-	if creds.Key == "" && creds.User != "" {
-		key, err := keyring.Get(keychainService, account(creds))
-		if err != nil && !errors.Is(err, keyring.ErrNotFound) {
-			return creds, fmt.Errorf("reading your API key from the system keychain: %w", err)
-		}
-		creds.Key = key
-	}
 	return creds, nil
+}
+
+// Key returns the API key the system keychain holds for creds, or "" if it holds none.
+func Key(creds cveservices.Credentials) (string, error) {
+	key, err := keyring.Get(keychainService, account(creds))
+	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		return "", fmt.Errorf("reading your API key from the system keychain: %w", err)
+	}
+	return key, nil
 }
 
 // Save stores the API key in the system keychain and the rest in the config file at path. Without a
 // keychain, the key goes in the file, which is readable by the owner only either way.
 func Save(path string, creds cveservices.Credentials) (inKeychain bool, err error) {
+	if previous, err := read(path); err == nil && previous.User != "" && account(previous) != account(creds) {
+		_ = keyring.Delete(keychainService, account(previous)) // a key that is not there is fine
+	}
 	if keyring.Set(keychainService, account(creds), creds.Key) == nil {
 		creds.Key, inKeychain = "", true
 	}
@@ -79,6 +78,37 @@ func Save(path string, creds cveservices.Credentials) (inKeychain bool, err erro
 	}
 	// WriteFile keeps the mode of a file that already exists.
 	return inKeychain, os.Chmod(path, 0o600)
+}
+
+// Remove deletes the saved credentials, the API key in the keychain included, and returns what it
+// removed. Nothing saved is not an error.
+func Remove(path string) (cveservices.Credentials, error) {
+	creds, err := read(path)
+	if err != nil || creds == (cveservices.Credentials{}) {
+		return creds, err
+	}
+	if creds.Key == "" {
+		err := keyring.Delete(keychainService, account(creds))
+		if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			return creds, fmt.Errorf("removing your API key from the system keychain: %w", err)
+		}
+	}
+	return creds, os.Remove(path)
+}
+
+func read(path string) (cveservices.Credentials, error) {
+	var creds cveservices.Credentials
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return creds, nil
+	}
+	if err != nil {
+		return creds, err
+	}
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return creds, fmt.Errorf("%s: %w", path, err)
+	}
+	return creds, nil
 }
 
 func account(creds cveservices.Credentials) string {

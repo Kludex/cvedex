@@ -289,6 +289,9 @@ func runProgram(t *testing.T, exchanges ...cassette.Exchange) *program {
 	url := cassette.Serve(t, exchanges...)
 	client := cveservices.New(cveservices.Credentials{URL: url, Org: "acme", User: "alice@acme.test", Key: "key"})
 	pr := &program{t: t, saw: filepath.Join(t.TempDir(), "saw")}
+	t.Setenv("GITHUB_API_URL", url)
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", os.Args[0])
 	t.Setenv("CVEDEX_TEST_EDITOR_SAW", pr.saw)
@@ -362,7 +365,7 @@ func TestEditReservedID(t *testing.T) {
 	dne := cassette.Load(t, "cve-record-dne")
 	dne.Path = "/api/cve/CVE-2026-1101"
 	invalid := cassette.Load(t, "bad-request")
-	invalid.Path = "/api/cve/CVE-2026-1101/cna"
+	invalid.Path, invalid.Body = "/api/cve/CVE-2026-1101/cna", ""
 	publish.Path = "/api/cve/CVE-2026-1101/cna"
 	list := cassette.Exchange{Method: "GET", Path: "/api/cve-id",
 		Response: `{"cve_ids":[{"cve_id":"CVE-2026-1101","state":"RESERVED"}]}`}
@@ -373,27 +376,69 @@ func TestEditReservedID(t *testing.T) {
 	pr.waitFor("CVE-2026-1101 has no record yet. Press e to write one.")
 
 	pr.edit("{}")
-	pr.waitFor("Publish CVE-2026-1101? It will be public. y/n")
+	pr.waitFor("CVE-2026-1101 is not a valid CNA container, press e to fix it",
+		"  - missing properties 'descriptions', 'affected', 'references'")
 	if _, opened := pr.sawEditing(); !strings.Contains(opened, `"descriptions": [{"lang": "en", "value": ""}]`) {
 		t.Errorf("template: %s", opened)
 	}
-	pr.press("y", 'y')
-	pr.waitFor("press e to fix it", "INVALID_JSON_SCHEMA", "/cnaContainer:")
 	pr.press("q", 'q')
 	pr.waitFor("Quit and discard your unsent drafts? y/n")
 	pr.press("n", 'n')
 
 	pr.edit(string(sent.CNA))
-	pr.waitFor("Publish CVE-2026-1101?")
-	path, opened := pr.sawEditing()
-	if opened != "{}" {
+	pr.waitFor("Publish CVE-2026-1101? It will be public. y/n")
+	if _, opened := pr.sawEditing(); opened != "{}" {
 		t.Errorf("the draft did not reopen: %s", opened)
 	}
+	pr.press("y", 'y')
+	pr.waitFor("press e to fix it", "INVALID_JSON_SCHEMA", "/cnaContainer:")
+
+	pr.edit("")
+	pr.waitFor("Publish CVE-2026-1101?")
+	path, _ := pr.sawEditing()
 	pr.press("y", 'y')
 	pr.waitFor("Published CVE-2026-1101")
 	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("draft %s was not removed: %v", path, err)
 	}
+}
+
+func TestFromAdvisory(t *testing.T) {
+	const url = "https://github.com/Kludex/python-multipart/security/advisories/GHSA-59g5-xgcq-4qw3"
+	list := cassette.Exchange{Method: "GET", Path: "/api/cve-id",
+		Response: `{"cve_ids":[{"cve_id":"CVE-2026-1101","state":"RESERVED"}]}`}
+	publish := cassette.Load(t, "publish")
+	publish.Path, publish.Body = "/api/cve/CVE-2026-1101/cna", ""
+	pr := runProgram(t, cassette.Load(t, "health-check"), list, cassette.Load(t, "advisory"), publish, list)
+
+	pr.waitFor("CVE-2026-1101", "i from advisory")
+	pr.press("i", 'i')
+	pr.waitFor("GitHub advisory URL for CVE-2026-1101: ", "enter fetch · esc cancel")
+	pr.press("q", 'q')
+	pr.press("", tea.KeyEscape)
+	pr.waitFor("i from advisory")
+
+	pr.press("i", 'i')
+	pr.p.Send(tea.PasteMsg{Content: "https://acme.org"})
+	pr.press("", tea.KeyEnter)
+	pr.waitFor("https://acme.org is not a GitHub repository advisory")
+
+	pr.t.Setenv("CVEDEX_TEST_EDITOR", "")
+	pr.press("i", 'i')
+	pr.p.Send(tea.PasteMsg{Content: url})
+	pr.press("", tea.KeyEnter)
+	pr.waitFor("Publish CVE-2026-1101? It will be public. y/n")
+	if _, opened := pr.sawEditing(); !strings.Contains(opened, `"advisory": "GHSA-59g5-xgcq-4qw3"`) {
+		t.Errorf("draft: %s", opened)
+	}
+	pr.press("n", 'n')
+	pr.press("i", 'i')
+	pr.waitFor("CVE-2026-1101 has a draft already. Press e to edit it.")
+
+	pr.edit("")
+	pr.waitFor("Publish CVE-2026-1101?")
+	pr.press("y", 'y')
+	pr.waitFor("Published CVE-2026-1101")
 }
 
 func TestEditPublishedRecord(t *testing.T) {
@@ -422,7 +467,13 @@ func TestEditPublishedRecord(t *testing.T) {
 	pr.waitFor("editor: exec:")
 	t.Setenv("VISUAL", "")
 
-	pr.edit(`{"descriptions":[{"lang":"en","value":"Changed."}]}`)
+	var container map[string]any
+	if err := json.Unmarshal([]byte(opened), &container); err != nil {
+		t.Fatal(err)
+	}
+	container["title"] = "Changed."
+	changed, _ := json.Marshal(container)
+	pr.edit(string(changed))
 	pr.waitFor("Update CVE-2026-1099? It will be public. y/n")
 	pr.press("y", 'y')
 	pr.waitFor("Sent for review: CVE-2026-1099", "n new ID")

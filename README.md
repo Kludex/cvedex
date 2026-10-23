@@ -58,7 +58,13 @@ Write `record.json`:
 }
 ```
 
-And publish it:
+Already have a GitHub advisory? Let `cvedex` write it for you:
+
+```sh
+cvedex record from-advisory https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx > record.json
+```
+
+And publish it. `cvedex` checks it against the CVE schema first:
 
 ```console
 $ cvedex publish CVE-2026-1101 record.json

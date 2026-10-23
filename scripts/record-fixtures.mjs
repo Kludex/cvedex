@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Records CVE Services cassettes from the test instance into testdata/recorded/.
+// Records CVE Services cassettes from the test instance, and GitHub advisories, into testdata/recorded/.
 // Without credentials it records the public endpoints and the error responses. With CVE_API_ORG,
 // CVE_API_USER and CVE_API_KEY set it also records the authenticated reads. With `--writes` it
 // also reserves one ID and publishes a test record to it, which changes state on the test
@@ -20,11 +20,11 @@ const keptHeaders = /^(content-type|cache-control|retry-after|ratelimit-.*)$/;
 const cassettes = new Map();
 let placeholders = [];
 
-async function record(name, expected, method, path, { auth = false, headers = {}, body } = {}) {
+async function record(name, expected, method, path, { auth = false, headers = {}, body, origin = base } = {}) {
   const sent = { ...headers };
   if (auth) Object.assign(sent, { "CVE-API-ORG": org, "CVE-API-USER": user, "CVE-API-KEY": key });
   if (body !== undefined) sent["content-type"] = "application/json";
-  const res = await fetchRetryingConnect(base + path, { method, headers: sent, body });
+  const res = await fetchRetryingConnect(origin + path, { method, headers: sent, body });
   const text = await res.text();
   if (res.status !== expected) throw new Error(`${method} ${path} returned ${res.status}, expected ${expected}`);
   const kept = Object.fromEntries([...res.headers].filter(([k]) => keptHeaders.test(k)).sort());
@@ -37,6 +37,9 @@ async function record(name, expected, method, path, { auth = false, headers = {}
 await record("health-check", 200, "GET", "/api/health-check");
 await record("cve-2025-0001", 200, "GET", "/api/cve/CVE-2025-0001");
 await record("cve-record-dne", 404, "GET", "/api/cve/CVE-2021-44228");
+const github = { origin: "https://api.github.com", headers: { accept: "application/vnd.github+json" } };
+await record("advisory", 200, "GET", "/repos/Kludex/python-multipart/security-advisories/GHSA-59g5-xgcq-4qw3", github);
+await record("advisory-dne", 404, "GET", "/repos/Kludex/starlette/security-advisories/GHSA-xxxx-xxxx-xxxx", github);
 await record("unauthorized", 401, "GET", "/api/org/acme/user/ada", {
   headers: { "CVE-API-ORG": "acme", "CVE-API-USER": "ada", "CVE-API-KEY": "not-a-key" },
 });

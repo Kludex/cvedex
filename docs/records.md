@@ -52,8 +52,53 @@ Save the CNA container, the part of a [CVE JSON 5](https://github.com/CVEProject
 
 `cvedex` also accepts the container wrapped as `{"cnaContainer": ...}`, or a full record as `cvedex show --json` prints it.
 
-!!! info "CVE Services validates the record"
-    `cvedex` sends the JSON as is. If it breaks the schema, you get CVE Services' errors, with the path of each wrong field.
+### From a GitHub advisory
+
+If the vulnerability has a [GitHub repository advisory](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/about-repository-security-advisories), start from it:
+
+```sh
+cvedex record from-advisory https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx > record.json
+```
+
+`cvedex` reads the advisory from GitHub's API and writes the CNA container, the way GitHub's own CNA does:
+
+| Advisory | Record |
+| --- | --- |
+| Summary | `title` |
+| Description | `descriptions` |
+| Each package and its vulnerable range | An `affected` entry: owner as vendor, package as product, the range as `version` and `lessThan` |
+| CWEs | `problemTypes` |
+| CVSS 3.x and 4.0 | `metrics`, with the severity |
+| Credits | `credits`, by GitHub login |
+| The advisory and the links in its description | `references` |
+
+Published advisories need no token. A draft does: set `GH_TOKEN`, for example to your GitHub CLI's token.
+
+```sh
+GH_TOKEN=$(gh auth token) cvedex record from-advisory https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx > record.json
+```
+
+!!! warning "Read it before you publish"
+    The record is only as good as the advisory. Check the title reads well on its own, the version range is right, and a CWE is there. A range `cvedex` cannot express, such as `> 1.0`, is kept as GitHub wrote it, and needs a hand.
+
+### Checked before sending
+
+`cvedex` checks the record against the [CVE JSON 5 schema](https://github.com/CVEProject/cve-schema) before it sends anything, so a mistake costs you no round trip:
+
+```console
+$ cvedex publish CVE-2026-1101 record.json
+Error: record.json is not a valid CNA container:
+  - /affected/0/versions/0: 'oneOf' failed, none matched
+    - maxProperties: got 3, want 2
+    - missing property 'versionType'
+    - missing properties 'versionType', 'lessThanOrEqual'
+  - /problemTypes/0/descriptions/0/cweId: minLength: got 4, want 5
+  - /problemTypes/0/descriptions/0/cweId: 'CWE-' does not match pattern '^CWE-[1-9][0-9]*$'
+```
+
+Each line is the path of a wrong field and what is wrong with it. A `oneOf` lists what each allowed shape is missing: here, a range needs a `versionType`.
+
+`cvedex` bundles schema v5.2.0, the newest, so it never rejects a record CVE Services would accept. CVE Services still validates on its side, and its errors are shown the same way.
 
 ## Publish
 

@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Kludex/cvedex/cveservices"
+	"github.com/Kludex/cvedex/internal/record"
 )
 
 // template is what `e` opens for a reserved ID: the fields CVE Services requires, a title and a CWE.
@@ -69,14 +70,29 @@ func (m Model) edit(id string) tea.Cmd {
 				return draftMsg{err: err}
 			}
 		}
-		f, err := os.CreateTemp("", id+"-*.json")
+		return writeDraft(d, d.original)
+	}
+}
+
+// fromAdvisory starts a draft for id from a GitHub repository advisory.
+func (m Model) fromAdvisory(id cveservices.CVEID, url string) tea.Cmd {
+	return func() tea.Msg {
+		cna, err := record.FromAdvisory(m.ctx, url)
 		if err != nil {
 			return draftMsg{err: err}
 		}
-		d.path = f.Name()
-		_, err = f.Write(d.original)
-		return draftMsg{d, errors.Join(err, f.Close())}
+		return writeDraft(draft{id: id.ID, original: []byte(template), publish: id.State == cveservices.StateReserved}, cna)
 	}
+}
+
+func writeDraft(d draft, content []byte) draftMsg {
+	f, err := os.CreateTemp("", d.id+"-*.json")
+	if err != nil {
+		return draftMsg{err: err}
+	}
+	d.path = f.Name()
+	_, err = f.Write(content)
+	return draftMsg{d, errors.Join(err, f.Close())}
 }
 
 // openEditor suspends the interface and runs $VISUAL or $EDITOR on the draft.
@@ -103,6 +119,10 @@ func (m *Model) edited(msg editedMsg) {
 		return
 	case !json.Valid(data):
 		m.err = fmt.Errorf("%s is not valid JSON, press e to fix it", d.id)
+		return
+	}
+	if err := record.Check(data); err != nil {
+		m.err = fmt.Errorf("%s is %w, press e to fix it", d.id, err)
 		return
 	}
 	verb, done, send := "Update", "Updated", m.client.Update

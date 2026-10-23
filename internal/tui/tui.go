@@ -16,11 +16,13 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/Kludex/cvedex/cveservices"
+	"github.com/Kludex/cvedex/internal/record"
 	"github.com/Kludex/cvedex/internal/render"
 )
 
@@ -62,6 +64,9 @@ type Model struct {
 	question string
 	answer   tea.Cmd
 	drafts   map[string]draft
+	// importing is the CVE ID whose advisory URL input is asking for.
+	importing cveservices.CVEID
+	input     textinput.Model
 
 	ids       []cveservices.CVEID
 	review    []cveservices.ReviewItem
@@ -182,6 +187,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.load(m.tab)
 	case tea.KeyPressMsg:
 		return m.key(msg)
+	case tea.PasteMsg:
+		var cmd tea.Cmd
+		if m.importing.ID != "" {
+			m.input, cmd = m.input.Update(msg)
+		}
+		return m, cmd
 	}
 	return m, nil
 }
@@ -211,6 +222,20 @@ func forbidden(err error) bool {
 
 func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
+	if m.importing.ID != "" {
+		id := m.importing
+		switch k {
+		case "esc", "ctrl+c":
+			m.importing = cveservices.CVEID{}
+			return m, nil
+		case "enter":
+			m.importing, m.loading = cveservices.CVEID{}, true
+			return m, m.fromAdvisory(id, strings.TrimSpace(m.input.Value()))
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
 	if m.question != "" {
 		answer := m.answer
 		m.question, m.answer = "", nil
@@ -270,6 +295,17 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if id, ok := pick(m.ids, m.table.Cursor(), m.tab == tabIDs); ok {
 			m.loading = true
 			return m, m.edit(id.ID)
+		}
+	case "i":
+		if id, ok := pick(m.ids, m.table.Cursor(), m.tab == tabIDs); ok {
+			if _, ok := m.drafts[id.ID]; ok {
+				m.flash = id.ID + " has a draft already. Press e to edit it."
+				return m, nil
+			}
+			m.importing, m.input = id, textinput.New()
+			m.input.Prompt = "GitHub advisory URL for " + id.ID + ": "
+			m.input.Placeholder = record.AdvisoryHint
+			return m, m.input.Focus()
 		}
 	case "n":
 		if m.tab == tabIDs {
@@ -507,19 +543,26 @@ func (m Model) View() tea.View {
 
 	status := []string{""}
 	var apiErr *cveservices.Error
+	var invalid *record.InvalidError
 	switch {
+	case m.importing.ID != "":
+		status[0] = m.input.View()
 	case m.question != "":
 		status[0] = render.Warn.Render(render.Clean(m.question)) + render.Faint.Render(" y/n")
 	case m.err != nil:
 		status[0] = render.Bad.Render(render.Clean(m.err.Error()))
+		var details []string
 		if errors.As(m.err, &apiErr) {
-			details := render.ErrorDetails(apiErr.Details)
-			if len(details) > maxDetails {
-				details = append(details[:maxDetails], render.Faint.Render(fmt.Sprintf("and %d more", len(details)-maxDetails)))
-			}
-			for _, detail := range details {
-				status = append(status, "  "+detail)
-			}
+			details = render.ErrorDetails(apiErr.Details)
+		}
+		if errors.As(m.err, &invalid) {
+			details = strings.Split(render.Clean(strings.Join(invalid.Problems, "\n")), "\n")
+		}
+		if len(details) > maxDetails {
+			details = append(details[:maxDetails], render.Faint.Render(fmt.Sprintf("and %d more", len(details)-maxDetails)))
+		}
+		for _, detail := range details {
+			status = append(status, "  "+detail)
 		}
 	case m.loading:
 		status[0] = m.spinner.View() + render.Faint.Render(" Loading")
@@ -544,8 +587,10 @@ func (m Model) View() tea.View {
 			tabReview:    "↑↓ scroll · a approve · esc back · q quit",
 			tabProposals: "↑↓ scroll · a approve · d deny · esc back · q quit",
 		}[m.tab]
+	case m.importing.ID != "":
+		hints = "enter fetch · esc cancel"
 	case m.tab == tabIDs:
-		hints = "↑↓ move · enter open · e edit · n new ID · r refresh · q quit"
+		hints = "↑↓ move · enter open · e edit · i from advisory · n new ID · r refresh · q quit"
 	case m.tab == tabReview:
 		hints = "↑↓ move · enter read · a approve · r refresh · q quit"
 	case m.tab == tabProposals:

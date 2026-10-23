@@ -36,6 +36,9 @@ func run(t *testing.T, url, stdin string, args ...string) result {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("CVE_API_URL", url)
+	t.Setenv("GITHUB_API_URL", url)
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("CVE_API_ORG", "acme")
 	t.Setenv("CVE_API_USER", "alice@acme.test")
 	t.Setenv("CVE_API_KEY", "key")
@@ -71,7 +74,12 @@ func TestCommands(t *testing.T) {
 	wrapped := filepath.Join(dir, "wrapped.json")
 	full := filepath.Join(dir, "full.json")
 	broken := filepath.Join(dir, "broken.json")
+	empty := filepath.Join(dir, "empty.json")
+	rejected := cassette.Load(t, "bad-request")
+	rejected.Body = ""
+	const advisoryURL = "https://github.com/Kludex/python-multipart/security/advisories/GHSA-59g5-xgcq-4qw3"
 	for path, data := range map[string]string{
+		empty:   "{}",
 		bare:    string(sent.CNA),
 		wrapped: publish.Body,
 		full:    `{"dataType":"CVE_RECORD","containers":{"cna":` + string(sent.CNA) + `}}`,
@@ -233,13 +241,40 @@ func TestCommands(t *testing.T) {
 			stdout: []string{"Sent CVE-2026-1100 for review"},
 		},
 		{
-			name:      "publish an invalid record",
-			exchanges: []cassette.Exchange{cassette.Load(t, "bad-request")},
-			args:      []string{"publish", "CVE-2026-1100", "-"},
-			stdin:     `{}`,
+			name:      "publish a record CVE Services rejects",
+			exchanges: []cassette.Exchange{rejected},
+			args:      []string{"publish", "CVE-2026-1100", bare},
 			code:      1,
 			stderr:    []string{"Error:", "INVALID_JSON_SCHEMA", "/cnaContainer"},
 		},
+		{
+			name:  "publish a record that breaks the schema",
+			args:  []string{"publish", "CVE-2026-1100", "-"},
+			stdin: `{"descriptions":[{"lang":"en","value":"x"}],"affected":[],"references":[],"\u001b":1}`,
+			code:  1,
+			stderr: []string{"Error: the record on stdin is not a valid CNA container:\n",
+				"  - /affected: minItems: got 0, want 1\n", `additional properties '\x1b' not allowed`},
+		},
+		{name: "update a file that breaks the schema", args: []string{"update", "CVE-2026-1100", empty}, code: 1,
+			stderr: []string{"empty.json is not a valid CNA container:\n  - missing properties"}},
+		{
+			name:      "record from-advisory",
+			exchanges: []cassette.Exchange{cassette.Load(t, "advisory")},
+			args:      []string{"record", "from-advisory", advisoryURL},
+			stdout: []string{`"title": "Denial of service (DoS) via deformation`, `"lessThan": "0.0.18"`,
+				`"cweId": "CWE-770"`, `"cvssV3_1": {`, `"value": "defnull",`, `"advisory": "GHSA-59g5-xgcq-4qw3"`},
+		},
+		{
+			name: "record from-advisory needs edits",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: cassette.Load(t, "advisory").Path,
+				Response: `{"ghsa_id":"GHSA-59g5-xgcq-4qw3","html_url":"` + advisoryURL + `","description":""}`}},
+			args:   []string{"record", "from-advisory", advisoryURL},
+			stdout: []string{`"affected": null`},
+			stderr: []string{"Edit it before you publish. It is not a valid CNA container:\n",
+				"  - /descriptions/0/value: minLength: got 0, want 1"},
+		},
+		{name: "record from-advisory with another URL", args: []string{"record", "from-advisory", "https://acme.org"},
+			code: 1, stderr: []string{"https://acme.org is not a GitHub repository advisory"}},
 		{name: "publish a file that is not JSON", args: []string{"publish", "CVE-2026-1100", broken}, code: 1,
 			stderr: []string{"broken.json is not a JSON object"}},
 		{

@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/repos/Kludex/starlette/security-advisories/GHSA-xxxx-xxxx-xxxx"
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/security-advisories/repository-advisories#get-a-repository-security-advisory\",\"status\":\"404\"}"
+  }
+}

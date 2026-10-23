@@ -18,6 +18,7 @@ import (
 
 	"github.com/Kludex/cvedex/cveservices"
 	"github.com/Kludex/cvedex/internal/config"
+	"github.com/Kludex/cvedex/internal/record"
 	"github.com/Kludex/cvedex/internal/render"
 )
 
@@ -185,6 +186,7 @@ func (a *app) width() int {
 func (a *app) printError(err error) {
 	var apiErr *cveservices.Error
 	var pending *cveservices.PendingApproval
+	var invalid *record.InvalidError
 	switch {
 	case errors.As(err, &apiErr) && a.json:
 		_, _ = fmt.Fprintln(a.stderr, strings.TrimSpace(string(apiErr.Body)))
@@ -194,6 +196,8 @@ func (a *app) printError(err error) {
 		id := render.Clean(pending.ProposalID)
 		_, _ = lipgloss.Fprintln(a.stderr, render.Warn.Render("Waiting for approval")+" as proposal "+
 			render.Bold.Render(id)+"\n"+hint("Check it with ", "cvedex proposals show "+id))
+	case errors.As(err, &invalid):
+		_, _ = lipgloss.Fprintln(a.stderr, render.Bad.Render("Error:")+" "+render.Clean(err.Error())+":\n"+problems(invalid))
 	case errors.Is(err, errNotLoggedIn):
 		_, _ = lipgloss.Fprintln(a.stderr, render.Bad.Render("Not logged in.")+" "+
 			hint("Run ", "cvedex login")+render.Faint.Render(", or set CVE_API_ORG, CVE_API_USER and CVE_API_KEY."))

@@ -48,11 +48,12 @@ internal/
   cli/                cobra commands
   tui/                bubbletea
   render/             lipgloss tables and the record summary
+  record/             the CVE JSON 5 schema check, and records built from GitHub advisories
   config/             ~/.config/cvedex/config.json, the key in the OS keychain, and env overrides
   cassette/           test server replaying testdata/recorded/
 ```
 
-Records pass through as `json.RawMessage`: CVE Services validates them, and the client only reads the few fields it renders.
+Records pass through as `json.RawMessage`, and the client only reads the few fields it renders. Before `publish`, `update` or a TUI save sends one, `internal/record` checks it against the bundled CNA container schema from `CVEProject/cve-schema` v5.2.0 (CC0), so a broken record fails before the network, with every problem listed. It adds a placeholder `providerMetadata` first, since CVE Services fills that in. The newest schema keeps the check no stricter than MITRE's.
 
 ### Config
 
@@ -74,6 +75,7 @@ cvedex update  CVE-2026-0001 record.json      PUT  /api/cve/{id}/cna
 cvedex reject  CVE-2026-0001 --reason "..."   POST /api/cve/{id}/reject, or PUT once published
 cvedex reject  CVE-2026-0001 --id-only | unreject CVE-2026-0001    PUT /api/cve-id/{id}?state=
 cvedex adp     CVE-2026-0001 adp.json         PUT  /api/cve/{id}/adp
+cvedex record from-advisory <GHSA URL>        a CNA container from a GitHub repository advisory, on stdout
 cvedex org | org quota | org users | org add-user <name> | org update-user <name> | org reset-key <name>
 ```
 
@@ -88,6 +90,8 @@ cvedex audit [--user name] [--since date] [--before id]
 cvedex submitter | submitter add <name> | submitter disable|enable <id>
 cvedex submitter token <id> [--agent] | submitter tokens <id> | submitter revoke <token-id>
 ```
+
+`record from-advisory` maps a repository advisory, drafts included with `GH_TOKEN`, the way GitHub's own CNA does: summary to title, description, one `affected` entry per package with the range as `version`/`lessThan(OrEqual)` and the ecosystem's `versionType`, CWEs, CVSS 3.x and 4.0 metrics, credits, and references (the advisory, then the description's links). A range it cannot express is kept verbatim. It warns on stderr when the result fails the schema check. The TUI's `i` does the same into a draft.
 
 `review show` prints a summary, a diff against the previous revision or the published record, and the full JSON, so a field the summary leaves out cannot hide.
 
@@ -166,7 +170,7 @@ A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|sub
 
 ## Dependencies
 
-- `cvedex`: `net/http` with redirects disabled, so the key never follows a redirect. `cobra` for commands, Charm's `bubbletea`, `bubbles`, `lipgloss` and `huh` for the TUI, output and prompts, `zalando/go-keyring` for the key (pure Go, so static builds keep working).
+- `cvedex`: `net/http` with redirects disabled, so the key never follows a redirect. `cobra` for commands, Charm's `bubbletea`, `bubbles`, `lipgloss` and `huh` for the TUI, output and prompts, `zalando/go-keyring` for the key and `santhosh-tekuri/jsonschema` for the schema check (both pure Go, so static builds keep working).
 - `cvedexd`: `hono`, `wrangler`, `@modelcontextprotocol/sdk` and `zod` for MCP. Tooling per the TypeScript rules: oxlint, oxc-format, `strict: true`.
 
 ## Phases
@@ -204,7 +208,6 @@ User docs live in `docs/`, built with [Zensical](https://zensical.org). Preview 
 
 ## Not in v1
 
-- CVE JSON 5.x schema validation client-side. Upstream validates; errors are shown verbatim.
 - Per-CNA-user reservation quotas. Submitters have `MAX_OPEN_IDS`.
 - A Windows install script. The release zip and `gh attestation verify` cover it.
 - MCP elicitation. The proposal queue covers approval for all clients.

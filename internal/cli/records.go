@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,11 +15,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Kludex/cvedex/cveservices"
+	"github.com/Kludex/cvedex/internal/record"
 	"github.com/Kludex/cvedex/internal/render"
 )
 
 func (a *app) recordCommands() []*cobra.Command {
-	cmds := []*cobra.Command{a.reserveCommand(), a.listCommand(), a.showCommand(),
+	cmds := []*cobra.Command{a.reserveCommand(), a.listCommand(), a.showCommand(), a.recordCommand(),
 		a.writeCommand("publish", "Publish the record of a reserved CVE ID", a.publish),
 		a.writeCommand("update", "Replace the record of a published CVE ID", a.update),
 		a.rejectCommand(), a.unrejectCommand(), a.adpCommand()}
@@ -152,6 +154,9 @@ func (a *app) writeCommand(name, short string, send writeFunc) *cobra.Command {
 			cna, err := a.readContainer(args[1])
 			if err != nil {
 				return err
+			}
+			if err := record.Check(cna); err != nil {
+				return fmt.Errorf("%s is %w", cmp.Or(strings.TrimPrefix(args[1], "-"), "the record on stdin"), err)
 			}
 			return a.write(cmd, name, cveID(args[0]), cna, yes, send)
 		},

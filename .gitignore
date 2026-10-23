@@ -2,3 +2,4 @@
 /dist/
 .env.local*
 site/
+*.local.md

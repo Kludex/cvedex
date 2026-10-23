@@ -27,7 +27,13 @@ curl -fsSL https://raw.githubusercontent.com/Kludex/cvedex/main/install.sh | sh
 
 The script downloads the latest release for your OS and architecture, checks it against `SHA256SUMS`, and puts `cvedex` in `~/.local/bin`. Set `CVEDEX_INSTALL_DIR` to install somewhere else.
 
-On Windows, download the archive from the [releases page](https://github.com/Kludex/cvedex/releases).
+If [`gh`](https://cli.github.com) is installed and logged in, the script also checks that GitHub's release workflow built the archive. Otherwise, check it yourself:
+
+```sh
+gh attestation verify cvedex-v0.1.0-aarch64-macos.tar.gz --repo Kludex/cvedex
+```
+
+On Windows, download the `.zip` from the [releases page](https://github.com/Kludex/cvedex/releases), check it with the same `gh attestation verify`, and put `cvedex.exe` on your `PATH`.
 
 ## First steps
 

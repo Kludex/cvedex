@@ -81,7 +81,7 @@ func (a *app) root() *cobra.Command {
 	root.AddCommand(a.recordCommands()...)
 	root.AddCommand(a.orgCommand())
 	root.AddCommand(a.cvedexdCommands()...)
-	root.AddCommand(a.tuiCommand(), a.mcpCommand())
+	root.AddCommand(a.tuiCommand())
 	root.SetIn(a.stdin)
 	root.SetOut(a.stdout)
 	root.SetErr(a.stderr)

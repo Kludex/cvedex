@@ -12,7 +12,8 @@ export type Agent = Omit<Submitter, "kind"> & { kind: "agent" };
 
 export type Actor = { kind: "cna_user"; name: string; headers: CveHeaders } | Submitter | Agent;
 
-export type Replay = { actor: Submitter; proposalId: string };
+/** A request cvedexd sends itself, as an actor already signed in: a proposal or an MCP tool call. */
+export type Replay = { actor: Actor; proposalId?: string };
 
 export type Env = {
   DB: D1Database;

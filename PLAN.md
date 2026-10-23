@@ -2,7 +2,7 @@
 
 One repo, two deliverables:
 
-- **`cvedex`** - a CVE Services client in Go: library, CLI, TUI, MCP server. Useful to any CNA on its own, like `cvelib` but in one static binary.
+- **`cvedex`** - a CVE Services client in Go: library, CLI, TUI. Useful to any CNA on its own, like `cvelib` but in one static binary.
 - **`cvedexd`** - a CNA policy server on Cloudflare Workers + D1, in TypeScript, under `server/`. It exposes the CVE Services API, so `cvedex` points at it unchanged, and adds review, audit and agent approval on top. It stores CVE records as opaque JSON and forwards them, so it shares no code with the client.
 
 ```
@@ -47,7 +47,6 @@ cveservices/          library: Client, typed errors, CVE IDs, orgs, cvedexd endp
 internal/
   cli/                cobra commands
   tui/                bubbletea
-  mcpserver/          MCP tools on the official go-sdk
   render/             lipgloss tables and the record summary
   config/             ~/.config/cvedex/config.json, the key in the OS keychain, and env overrides
   cassette/           test server replaying testdata/recorded/
@@ -94,7 +93,9 @@ cvedex submitter token <id> [--agent] | submitter tokens <id> | submitter revoke
 
 ### MCP
 
-Stdio, JSON-RPC 2.0. Tools map 1:1 to CLI commands: `list_cves`, `show_cve`, `reserve_ids`, `publish_cve`, `update_cve`, `reject_cve`. Write tools carry `destructiveHint`; read tools `readOnlyHint`. `cvedex mcp --read-only` offers only the read tools, because a published record is untrusted text that can carry instructions for the agent. Against MITRE directly, the MCP client prompt is the only guard. Against `cvedexd` with an agent token, writes return `{status: "pending_approval", proposal_id}` and the human approves from the CLI or TUI.
+Served by `cvedexd` at `POST /mcp`, Streamable HTTP, stateless, with JSON responses. Remote, so agents running in the cloud can use it and nothing is installed next to the agent. Signed in with the same three headers as the API; no OAuth, so clients that only support OAuth cannot connect.
+
+Tools map 1:1 to CLI commands: `list_cves`, `show_cve`, `reserve_ids`, `publish_cve`, `update_cve`, `reject_cve`. Each calls `cvedexd`'s own routes in-process as the signed-in actor (the `REPLAY` binding, as proposal approval does), so quota, audit, review and proposals apply unchanged, and a CNA user is checked upstream once per MCP request rather than once per inner call. Write tools carry `destructiveHint`; read tools `readOnlyHint`. `/mcp?read_only=true` offers only the read tools, because a published record is untrusted text that can carry instructions for the agent. With a CNA user's key, the MCP client prompt is the only guard. With an agent token, writes return `{status: "pending_approval", proposal_id}` and the human approves from the CLI or TUI.
 
 ### TUI
 
@@ -165,15 +166,15 @@ A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|sub
 
 ## Dependencies
 
-- `cvedex`: `net/http` with redirects disabled, so the key never follows a redirect. `cobra` for commands, Charm's `bubbletea`, `bubbles`, `lipgloss` and `huh` for the TUI, output and prompts, `modelcontextprotocol/go-sdk` for MCP, `zalando/go-keyring` for the key (pure Go, so static builds keep working).
-- `cvedexd`: `hono`, `wrangler`. Tooling per the TypeScript rules: oxlint, oxc-format, `strict: true`.
+- `cvedex`: `net/http` with redirects disabled, so the key never follows a redirect. `cobra` for commands, Charm's `bubbletea`, `bubbles`, `lipgloss` and `huh` for the TUI, output and prompts, `zalando/go-keyring` for the key (pure Go, so static builds keep working).
+- `cvedexd`: `hono`, `wrangler`, `@modelcontextprotocol/sdk` and `zod` for MCP. Tooling per the TypeScript rules: oxlint, oxc-format, `strict: true`.
 
 ## Phases
 
 1. **`cvedex` core.** Library + CLI: `login reserve list show publish update ping`, `--json`. Already a usable CNA client for anyone.
 2. **`cvedexd` reserve + audit.** Submitters, tokens, upstream credential check for CNA users, forwarded reservation, audit. Client needs no change.
 3. **`cvedexd` review.** `in_review` on publish, approve, request-changes. Client gains the discovered commands.
-4. **Agents.** Agent tokens, proposals, `cvedex mcp`.
+4. **Agents.** Agent tokens, proposals, remote MCP at `/mcp`.
 5. **TUI.**
 
 ## Distribution
@@ -192,7 +193,7 @@ Later, if people ask: a Homebrew tap and a `.deb`. Not before.
 
 ## Testing
 
-- `cvedex` tests drive the CLI, TUI model and MCP server through their public entry points against `internal/cassette`, an `httptest` server that replays the recorded exchanges in order and fails on any other request. `cvedexd` endpoints have no recordings yet, so those tests use inline exchanges in the server's response shapes.
+- `cvedex` tests drive the CLI and TUI model through their public entry points against `internal/cassette`, an `httptest` server that replays the recorded exchanges in order and fails on any other request. `cvedexd` endpoints have no recordings yet, so those tests use inline exchanges in the server's response shapes.
 - `cvedexd` tests run under `@cloudflare/vitest-plugin` (the renamed `vitest-pool-workers`) against a real D1 binding, with upstream calls answered from fixtures by a stubbed `fetch`. 100% coverage is enforced.
 - Cassettes live in `testdata/recorded/`, shared by both test suites, and come from `scripts/record-fixtures.mjs`. Each holds the request and the response's status, rate-limit and content headers, and raw body. Without credentials it records the public and error responses; with a test-instance CNA account it records the authenticated reads, with `--writes` also a reservation and a publish, and with `--lifecycle` the ID state changes, both rejects and a user update. `--only=a,b` rewrites just those cassettes. Tests only replay; CI never calls the test instance.
 - CI runs `go test -race` on Linux, macOS and Windows, and enforces 100% coverage of `cveservices/` and `internal/` on Linux. The prompts and `cvedex tui` are tested in a pseudo-terminal, which Windows skips.

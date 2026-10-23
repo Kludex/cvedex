@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -1167,33 +1166,6 @@ func TestConfigErrors(t *testing.T) {
 			!strings.Contains(stderr.String(), "permission denied") {
 			t.Errorf("read-only %s: exit code %d, stderr %q", readOnly, code, stderr.String())
 		}
-	}
-}
-
-func TestMCP(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("CVE_API_ORG", "acme")
-	t.Setenv("CVE_API_USER", "alice@acme.test")
-	t.Setenv("CVE_API_KEY", "key")
-	stdin, input := io.Pipe()
-	output, stdout := io.Pipe()
-	code := make(chan int)
-	go func() { code <- cli.Main(context.Background(), []string{"mcp"}, stdin, stdout, io.Discard) }()
-	_, err := io.WriteString(input, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":`+
-		`{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`+"\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	line, err := bufio.NewReader(output).ReadString('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(line, `"serverInfo":{"name":"cvedex"`) {
-		t.Errorf("initialize: %s", line)
-	}
-	_ = input.Close()
-	if c := <-code; c != 0 {
-		t.Errorf("exit code %d", c)
 	}
 }
 

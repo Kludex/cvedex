@@ -5,6 +5,7 @@ import { actor, authenticate, fail, sha256 } from "./auth";
 import { cve } from "./cve";
 import { cvedexd } from "./cvedexd";
 import type { AppEnv } from "./env";
+import { mcp } from "./mcp";
 import { notify, serviceHeaders, upstream } from "./upstream";
 
 const MAX_BODY = 1024 * 1024;
@@ -101,6 +102,8 @@ app.get("/api/cvedexd/published", async (c) => {
   await caches.default.put(key, res.clone());
   return res;
 });
+app.post("/mcp", limit, authenticate, mcp);
+app.on(["GET", "DELETE"], "/mcp", (c) => c.body(null, 405, { Allow: "POST" }));
 app.use("/api/*", limit, authenticate, audit, propose);
 app.route("/api/cvedexd", cvedexd);
 app.route("/api", cve);

@@ -8,10 +8,10 @@
 
 The key features are:
 
-- **One binary**: a CLI, a terminal UI, an MCP server and a Go library. No runtime to install.
+- **One binary**: a CLI, a terminal UI and a Go library. No runtime to install.
 - **Safe by default**: it asks before anything public happens, and your API key lives in your system keychain.
 - **Made for scripts**: every command has `--json`, and `--yes` skips the questions.
-- **Made for agents**: `cvedex mcp` gives Claude, Codex or any MCP client the same tools you have.
+- **Made for agents**: `cvedexd` serves the same tools over remote MCP, and an agent's writes wait for your approval.
 - **Shareable**: with `cvedexd`, your maintainers reserve IDs and propose records, and only your CNA's users publish.
 
 ## Install

@@ -2,7 +2,7 @@
 
 `cvedex` is a client for [CVE Services](https://www.cve.org/AllResources/CveServices), the API CNAs use to reserve CVE IDs and publish CVE records.
 
-It is one static binary with a CLI, a terminal UI, an MCP server for AI agents, and a Go library.
+It is one static binary with a CLI, a terminal UI and a Go library. [cvedexd](cvedexd/index.md) serves the same tools to [AI agents](agents.md) over MCP.
 
 ```console
 $ cvedex reserve

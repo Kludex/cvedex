@@ -76,6 +76,8 @@ Under `/api/cvedexd/`:
 | `DELETE` | `/tokens/{id}` | CNA user, or the token's submitter | Revokes it, and denies the proposals it made |
 | `GET` | `/published` | Anyone | Your CNA's published CVE IDs |
 
+`POST /mcp` serves the same tools to AI agents over MCP, signed in with the headers above. See [AI agents](../agents.md).
+
 ### Published IDs
 
 `GET /api/cvedexd/published` needs no headers. It is there so a website can list your CNA's CVEs without holding any credentials:

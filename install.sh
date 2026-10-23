@@ -33,6 +33,11 @@ else
   actual=$(shasum -a 256 "$tmp/$archive" | cut -d ' ' -f 1)
 fi
 [ -n "$expected" ] && [ "$expected" = "$actual" ] || { echo "cvedex: checksum mismatch for $archive" >&2; exit 1; }
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  gh attestation verify "$tmp/$archive" --repo "$repo" >/dev/null || { echo "cvedex: $archive was not built by $repo's release workflow" >&2; exit 1; }
+else
+  echo "Install and log in to gh to also check that GitHub built $archive."
+fi
 
 mkdir -p "$dest"
 tar -xzf "$tmp/$archive" -C "$tmp"

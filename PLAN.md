@@ -9,6 +9,7 @@ One repo, two deliverables:
 go.mod  install.sh  LICENSE  PLAN.md
 cmd/ cveservices/ internal/   cvedex (Go)
 testdata/recorded/   cassettes shared by both test suites
+docs/, zensical.toml user docs, built with Zensical
 server/              cvedexd (TypeScript): wrangler.toml, package.json, src/, migrations/
 .github/workflows/
   ci.yml             golangci-lint + go test, server vitest, on every PR
@@ -185,6 +186,10 @@ Later, if people ask: a Homebrew tap and a `.deb`. Not before.
 - `cvedexd` tests run under `@cloudflare/vitest-plugin` (the renamed `vitest-pool-workers`) against a real D1 binding, with upstream calls answered from fixtures by a stubbed `fetch`. 100% coverage is enforced.
 - Cassettes live in `testdata/recorded/`, shared by both test suites, and come from `scripts/record-fixtures.mjs`. Each holds the request and the response's status, rate-limit and content headers, and raw body. Without credentials it records the public and error responses; with a test-instance CNA account it records the authenticated reads, and with `--writes` also a reservation and a publish. Tests only replay; CI never calls the test instance.
 - CI runs `go test -race` on Linux, macOS and Windows, and enforces 100% coverage of `cveservices/` and `internal/` on Linux. The prompts and `cvedex tui` are tested in a pseudo-terminal, which Windows skips.
+
+## Docs
+
+User docs live in `docs/`, built with [Zensical](https://zensical.org). Preview them with `uvx zensical serve`. They cover the client by task (log in, publish, org, TUI, agents, scripting, library) and `cvedexd` (why, deploy, submitters, review, API), with examples taken from real runs against the test instance.
 
 ## Not in v1
 

@@ -1,3 +1,4 @@
 /cvedex
 /dist/
 .env.local*
+site/

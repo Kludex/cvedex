@@ -23,6 +23,8 @@ type recorder struct {
 
 func (r *recorder) Helper() {}
 
+func (r *recorder) Skipped() bool { return false }
+
 func (r *recorder) Errorf(format string, args ...any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

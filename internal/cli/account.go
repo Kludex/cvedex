@@ -55,6 +55,14 @@ func (a *app) loginCommand() *cobra.Command {
 			}
 			client := cveservices.New(creds)
 			me, err := client.User(cmd.Context(), creds.User)
+			role := ""
+			var apiErr *cveservices.Error
+			if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden {
+				// cvedexd refuses user lookups to submitters, so a 403 from it proves the token.
+				if health, healthErr := client.Health(cmd.Context()); healthErr == nil && health.IsCvedexd() {
+					me, err, role = &cveservices.User{}, nil, ", submitter"
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -62,7 +70,7 @@ func (a *app) loginCommand() *cobra.Command {
 				return err
 			}
 			a.print(render.Good.Render("Logged in") + " to " + creds.URL + " as " + render.Bold.Render(creds.User) +
-				" (" + creds.Org + roles(me.Authority) + ").\n" + render.Faint.Render("Saved to "+a.configPath))
+				" (" + creds.Org + roles(me.Authority) + role + ").\n" + render.Faint.Render("Saved to "+a.configPath))
 			return nil
 		},
 	}

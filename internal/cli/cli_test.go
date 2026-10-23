@@ -586,6 +586,16 @@ func TestLogin(t *testing.T) {
 	}
 }
 
+func TestLoginAsSubmitter(t *testing.T) {
+	forbidden := cassette.Exchange{Method: "GET", Path: "/api/org/acme/user/bob", Status: 403,
+		Response: `{"error":"NOT_ALLOWED","message":"Submitters can only reserve IDs and submit records"}`}
+	exchanges := append([]cassette.Exchange{forbidden}, cvedexd()...)
+	got := run(t, cassette.Serve(t, exchanges...), "token\n", "login", "--org", "acme", "--user", "bob")
+	if got.code != 0 || !strings.Contains(got.stdout, "as bob (acme, submitter)") {
+		t.Errorf("exit code %d, stdout %q, stderr %q", got.code, got.stdout, got.stderr)
+	}
+}
+
 func TestLoginFailures(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -600,6 +610,12 @@ func TestLoginFailures(t *testing.T) {
 			args: []string{"login", "--test"}, stderr: "missing --org"},
 		{name: "no org or user", env: map[string]string{"CVE_API_ORG": "", "CVE_API_USER": ""}, stdin: "key\n",
 			args: []string{"login"}, stderr: "missing --org and --user"},
+		{name: "forbidden by CVE Services", stdin: "key", args: []string{"login", "--user", "bob"},
+			exchanges: []cassette.Exchange{
+				{Method: "GET", Path: "/api/org/acme/user/bob", Status: 403, Response: `{"message":"Not yours"}`},
+				cassette.Load(t, "health-check"),
+			},
+			stderr: "Not yours"},
 		{name: "wrong key", exchanges: []cassette.Exchange{cassette.Load(t, "unauthorized")}, stdin: "key",
 			args: []string{"login", "--user", "ada"}, stderr: "Check your credentials with cvedex status"},
 	}

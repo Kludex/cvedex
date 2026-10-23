@@ -3,7 +3,9 @@
 // Without credentials it records the public endpoints and the error responses. With CVE_API_ORG,
 // CVE_API_USER and CVE_API_KEY set it also records the authenticated reads. With `--writes` it
 // also reserves one ID and publishes a test record to it, which changes state on the test
-// instance. It never calls reset_secret, and it writes nothing if the API key appears in a response.
+// instance. With `--lifecycle` it reserves two more IDs, rejects one before and one after
+// publishing, and renames the user to their own name. `--only=a,b` writes just those cassettes.
+// It never calls reset_secret, and it writes nothing if the API key appears in a response.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -12,6 +14,8 @@ const out = join(import.meta.dirname, "..", "testdata", "recorded");
 const { CVE_API_ORG: org, CVE_API_USER: user, CVE_API_KEY: key } = process.env;
 const authed = Boolean(org && user && key);
 const writes = process.argv.includes("--writes");
+const lifecycle = process.argv.includes("--lifecycle");
+const only = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length).split(",");
 const keptHeaders = /^(content-type|cache-control|retry-after|ratelimit-.*)$/;
 const cassettes = new Map();
 let placeholders = [];
@@ -65,6 +69,42 @@ if (authed) {
       }),
     });
   }
+  if (lifecycle) {
+    const year = new Date().getUTCFullYear();
+    const reserve = async () => {
+      const path = `/api/cve-id?amount=1&cve_year=${year}&short_name=${enc(org)}`;
+      return JSON.parse(await record("lifecycle-reserve", 200, "POST", path, { auth: true })).cve_ids[0].cve_id;
+    };
+    const reasons = JSON.stringify({
+      cnaContainer: { rejectedReasons: [{ lang: "en", value: "cvedex fixture recording. Not a real ID." }] },
+    });
+    await record("id-quota", 200, "GET", `/api/org/${enc(org)}/id_quota`, { auth: true });
+    const unused = await reserve();
+    await record("cve-id-reserved", 200, "GET", `/api/cve-id/${unused}`, { auth: true });
+    await record("id-state-rejected", 200, "PUT", `/api/cve-id/${unused}?state=REJECTED`, { auth: true });
+    await record("id-state-reserved", 200, "PUT", `/api/cve-id/${unused}?state=RESERVED`, { auth: true });
+    await record("reject", 200, "POST", `/api/cve/${unused}/reject`, { auth: true, body: reasons });
+    const used = await reserve();
+    await record("lifecycle-publish", 200, "POST", `/api/cve/${used}/cna`, {
+      auth: true,
+      body: JSON.stringify({
+        cnaContainer: {
+          providerMetadata: { orgId: me.org_UUID },
+          descriptions: [{ lang: "en", value: "cvedex fixture recording. Not a real vulnerability." }],
+          affected: [{ vendor: "cvedex", product: "fixture", versions: [{ version: "0", status: "affected" }] }],
+          references: [{ url: "https://github.com/Kludex/cvedex" }],
+        },
+      }),
+    });
+    await record("cve-id-published", 200, "GET", `/api/cve-id/${used}`, { auth: true });
+    await record("reject-published", 200, "PUT", `/api/cve/${used}/reject`, { auth: true, body: reasons });
+    await record("adp-forbidden", 403, "PUT", `/api/cve/${used}/adp`, {
+      auth: true,
+      body: JSON.stringify({ adpContainer: { title: "cvedex fixture recording" } }),
+    });
+    const first = `name.first=${enc(me.name.first)}`;
+    await record("user-update", 200, "PUT", `/api/org/${enc(org)}/user/${enc(user)}?${first}`, { auth: true });
+  }
   await record("cve-id-list", 200, "GET", "/api/cve-id", { auth: true });
   // Longest first, so a full name is replaced before a short name it contains.
   placeholders = [
@@ -92,7 +132,7 @@ async function fetchRetryingConnect(url, init, attempts = 5) {
   }
 }
 
-const serialized = [...cassettes].map(([name, { auth, cassette }]) => {
+const serialized = [...cassettes].filter(([name]) => !only || only.includes(name)).map(([name, { auth, cassette }]) => {
   let text = `${JSON.stringify(cassette, null, 2)}\n`;
   if (auth) for (const [real, placeholder] of placeholders) text = text.replaceAll(real, placeholder);
   return [name, text];

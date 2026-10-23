@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -109,8 +110,8 @@ func (a *app) connect(cmd *cobra.Command, _ []string) error {
 		creds.URL = a.url
 	}
 	a.configPath, a.client = path, cveservices.New(creds)
-	if _, err := url.ParseRequestURI(a.client.Credentials.URL); err != nil {
-		return fmt.Errorf("invalid URL %q", creds.URL)
+	if err := checkURL(a.client.Credentials.URL); err != nil {
+		return err
 	}
 	needsAuth := true
 	for c := cmd; c != nil; c = c.Parent() {
@@ -123,6 +124,21 @@ func (a *app) connect(cmd *cobra.Command, _ []string) error {
 }
 
 var errNotLoggedIn = errors.New("not logged in")
+
+// checkURL refuses URLs that would send the API key in clear text, except to this machine.
+func checkURL(raw string) error {
+	u, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return fmt.Errorf("invalid URL %q", raw)
+	}
+	host := u.Hostname()
+	ip := net.ParseIP(host)
+	local := host == "localhost" || (ip != nil && ip.IsLoopback())
+	if secure := u.Scheme == "https" || (u.Scheme == "http" && local); !secure {
+		return fmt.Errorf("%s would send your API key unencrypted; use https://", raw)
+	}
+	return nil
+}
 
 // print writes text, dropping colors when stdout is not a terminal.
 func (a *app) print(text string) {
@@ -168,13 +184,14 @@ func (a *app) printError(err error) {
 	case errors.As(err, &apiErr):
 		a.printAPIError(apiErr)
 	case errors.As(err, &pending):
+		id := render.Clean(pending.ProposalID)
 		_, _ = lipgloss.Fprintln(a.stderr, render.Warn.Render("Waiting for approval")+" as proposal "+
-			render.Bold.Render(pending.ProposalID)+"\n"+hint("Approve it with ", "cvedex proposals approve "+pending.ProposalID))
+			render.Bold.Render(id)+"\n"+hint("Check it with ", "cvedex proposals show "+id))
 	case errors.Is(err, errNotLoggedIn):
 		_, _ = lipgloss.Fprintln(a.stderr, render.Bad.Render("Not logged in.")+" "+
 			hint("Run ", "cvedex login")+render.Faint.Render(", or set CVE_API_ORG, CVE_API_USER and CVE_API_KEY."))
 	default:
-		_, _ = lipgloss.Fprintln(a.stderr, render.Bad.Render("Error:")+" "+err.Error())
+		_, _ = lipgloss.Fprintln(a.stderr, render.Bad.Render("Error:")+" "+render.Clean(err.Error()))
 	}
 }
 
@@ -185,7 +202,7 @@ func hint(text, command string) string {
 
 func (a *app) printAPIError(e *cveservices.Error) {
 	var b strings.Builder
-	b.WriteString(render.Bad.Render("Error:") + " " + e.Error())
+	b.WriteString(render.Bad.Render("Error:") + " " + render.Clean(e.Error()))
 	for _, detail := range render.ErrorDetails(e.Details) {
 		b.WriteString("\n  " + detail)
 	}

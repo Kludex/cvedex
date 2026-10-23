@@ -12,6 +12,7 @@ import (
 // container, or one wrapped as {"cnaContainer": ...}. Fields that are missing or
 // malformed are left out rather than failing: records in the wild do not always match the schema.
 func Record(raw json.RawMessage, width int) string {
+	raw = cleanJSON(raw)
 	var r struct {
 		Metadata struct {
 			ID            string `json:"cveId"`

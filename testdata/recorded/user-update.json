@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/org/acme/user/alice%40acme.test?name.first=acme"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"message\":\"alice@acme.test was successfully updated.\",\"updated\":{\"UUID\":\"0b7d2c4e-9a1f-4e3b-8c6d-5f4a3b2c1d0e\",\"username\":\"alice@acme.test\",\"authority\":{\"active_roles\":[\"ADMIN\"]},\"active\":true,\"time\":{\"created\":\"2026-10-22T16:29:00.301Z\",\"modified\":\"2026-10-23T12:52:09.066Z\"},\"name\":{\"first\":\"acme\",\"middle\":\"\",\"last\":\"Doe\",\"suffix\":\"\"},\"org_UUID\":\"6f1e6c5e-2b1f-4a8a-9d3e-0c5f8f1a2b3c\",\"role\":\"ADMIN\"}}"
+  }
+}

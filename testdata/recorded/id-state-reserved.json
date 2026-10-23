@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "PUT",
+    "path": "/api/cve-id/CVE-2026-1107?state=RESERVED"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"message\":\"CVE-2026-1107 was successfully updated.\",\"updated\":{\"requested_by\":{\"user\":\"alice@acme.test\",\"cna\":\"acme\"},\"time\":{\"created\":\"2026-10-23T12:52:06.919Z\",\"modified\":\"2026-10-23T12:52:07.330Z\"},\"cve_id\":\"CVE-2026-1107\",\"cve_year\":\"2026\",\"state\":\"REJECTED\",\"reserved\":\"2026-10-23T12:52:06.918Z\",\"owning_cna\":\"acme\"}}"
+  }
+}

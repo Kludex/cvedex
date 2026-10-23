@@ -38,6 +38,8 @@ type RequestedBy struct {
 type LocalState struct {
 	State string `json:"state"`
 	Note  string `json:"note,omitempty"`
+	// Revision counts the records submitted for the ID.
+	Revision int `json:"revision,omitempty"`
 }
 
 // ChangesRequested reports whether a reviewer sent the record back, with Note saying why.
@@ -83,13 +85,36 @@ func (c *Client) Reserve(ctx context.Context, opts ReserveOptions) ([]CVEID, err
 	return out.CVEIDs, err
 }
 
-// ListIDs returns every CVE ID of the org in state, or in any state when state is empty. It
-// follows pagination.
-func (c *Client) ListIDs(ctx context.Context, state string) ([]CVEID, error) {
+// IDFilter narrows ListIDs. Zero fields match everything.
+type IDFilter struct {
+	// State is StateReserved, StatePublished or StateRejected.
+	State          string
+	Year           int
+	ReservedAfter  time.Time
+	ReservedBefore time.Time
+	ModifiedAfter  time.Time
+	ModifiedBefore time.Time
+}
+
+// ListIDs returns every CVE ID of the org that matches filter. It follows pagination.
+func (c *Client) ListIDs(ctx context.Context, filter IDFilter) ([]CVEID, error) {
 	var ids []CVEID
 	query := url.Values{}
-	if state != "" {
-		query.Set("state", state)
+	if filter.State != "" {
+		query.Set("state", filter.State)
+	}
+	if filter.Year != 0 {
+		query.Set("cve_id_year", strconv.Itoa(filter.Year))
+	}
+	for name, at := range map[string]time.Time{
+		"time_reserved.gt": filter.ReservedAfter,
+		"time_reserved.lt": filter.ReservedBefore,
+		"time_modified.gt": filter.ModifiedAfter,
+		"time_modified.lt": filter.ModifiedBefore,
+	} {
+		if !at.IsZero() {
+			query.Set(name, at.UTC().Format(time.RFC3339))
+		}
 	}
 	for {
 		var page struct {
@@ -105,6 +130,20 @@ func (c *Client) ListIDs(ctx context.Context, state string) ([]CVEID, error) {
 		}
 		query.Set("page", strconv.Itoa(*page.NextPage))
 	}
+}
+
+// ID returns one CVE ID of the org.
+func (c *Client) ID(ctx context.Context, id string) (*CVEID, error) {
+	var out CVEID
+	err := c.Do(ctx, http.MethodGet, "/api/cve-id/"+url.PathEscape(id), nil, nil, &out)
+	return &out, err
+}
+
+// SetIDState rejects a reserved ID that has no record, with StateRejected, or reserves it again,
+// with StateReserved.
+func (c *Client) SetIDState(ctx context.Context, id, state string) error {
+	query := url.Values{"state": {state}}
+	return c.Do(ctx, http.MethodPut, "/api/cve-id/"+url.PathEscape(id), query, nil, nil)
 }
 
 // Record returns a CVE record as JSON 5.x. Records are passed through as received; render them
@@ -125,9 +164,28 @@ func (c *Client) Update(ctx context.Context, id string, cna json.RawMessage) (js
 	return c.writeRecord(ctx, http.MethodPut, "/api/cve/"+url.PathEscape(id)+"/cna", cna)
 }
 
-// Reject rejects a CVE ID. cna holds `rejectedReasons` and optionally `replacedBy`.
+// Reject publishes a rejected record for a CVE ID and returns it. cna holds `rejectedReasons`
+// and optionally `replacedBy`. A published record is replaced, so Reject asks for the ID's state
+// first.
 func (c *Client) Reject(ctx context.Context, id string, cna json.RawMessage) (json.RawMessage, error) {
-	return c.writeRecord(ctx, http.MethodPost, "/api/cve/"+url.PathEscape(id)+"/reject", cna)
+	current, err := c.ID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	method := http.MethodPost
+	if current.State == StatePublished {
+		method = http.MethodPut
+	}
+	return c.writeRecord(ctx, method, "/api/cve/"+url.PathEscape(id)+"/reject", cna)
+}
+
+// ADP adds or replaces the client's ADP container on a published record and returns the record.
+// Only users of an org with the ADP role can.
+func (c *Client) ADP(ctx context.Context, id string, adp json.RawMessage) (json.RawMessage, error) {
+	var body json.RawMessage
+	path := "/api/cve/" + url.PathEscape(id) + "/adp"
+	err := c.Do(ctx, http.MethodPut, path, nil, map[string]json.RawMessage{"adpContainer": adp}, &body)
+	return written(body), err
 }
 
 func (c *Client) writeRecord(ctx context.Context, method, path string, cna json.RawMessage) (json.RawMessage, error) {

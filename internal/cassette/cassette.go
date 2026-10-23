@@ -79,7 +79,8 @@ func Serve(t testing.TB, exchanges ...Exchange) string {
 		}
 		e := exchanges[next]
 		next++
-		if want, _ := url.PathUnescape(e.Path); r.Method != e.Method || r.URL.Path+query(r.URL) != want {
+		want, _ := url.PathUnescape(e.Path)
+		if got, _ := url.PathUnescape(r.URL.EscapedPath() + query(r.URL)); r.Method != e.Method || got != want {
 			t.Errorf("request %d: got %s %s, want %s %s", next, r.Method, r.URL.RequestURI(), e.Method, e.Path)
 		}
 		if e.Body != "" && !sameJSON(body, []byte(e.Body)) {

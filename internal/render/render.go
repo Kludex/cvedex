@@ -46,9 +46,16 @@ func State(state string) string {
 // cell of the body.
 func Table(headers []string, rows [][]string, style func(row, col int) lipgloss.Style) string {
 	cell := lipgloss.NewStyle().PaddingRight(3)
+	clean := make([][]string, len(rows))
+	for i, row := range rows {
+		clean[i] = make([]string, len(row))
+		for j, text := range row {
+			clean[i][j] = Clean(text)
+		}
+	}
 	return trimLines(table.New().
 		Headers(headers...).
-		Rows(rows...).
+		Rows(clean...).
 		Border(lipgloss.HiddenBorder()).
 		BorderTop(false).BorderBottom(false).BorderLeft(false).BorderRight(false).
 		BorderHeader(false).BorderColumn(false).
@@ -91,7 +98,7 @@ func IDs(ids []cveservices.CVEID) string {
 	var notes []string
 	for _, id := range ids {
 		if id.Cvedexd.ChangesRequested() {
-			notes = append(notes, Warn.Render(id.ID+":")+" "+id.Cvedexd.Note)
+			notes = append(notes, Warn.Render(Clean(id.ID)+":")+" "+Clean(id.Cvedexd.Note))
 		}
 	}
 	if notes != nil {
@@ -117,14 +124,14 @@ func ErrorDetails(raw json.RawMessage) []string {
 	switch {
 	case json.Unmarshal(raw, &schema) == nil && len(schema.Errors) > 0:
 		for _, e := range schema.Errors {
-			out = append(out, Faint.Render(e.Path+":")+" "+e.Message)
+			out = append(out, Faint.Render(Clean(e.Path)+":")+" "+Clean(e.Message))
 		}
 	case json.Unmarshal(raw, &params) == nil:
 		for _, p := range params {
-			out = append(out, Faint.Render(p.Param+":")+" "+p.Message)
+			out = append(out, Faint.Render(Clean(p.Param)+":")+" "+Clean(p.Message))
 		}
 	case len(raw) > 0:
-		out = append(out, Faint.Render(string(raw)))
+		out = append(out, Faint.Render(Clean(string(raw))))
 	}
 	return out
 }

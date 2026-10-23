@@ -121,6 +121,20 @@ func (m *Model) edited(msg editedMsg) {
 	})
 }
 
+// quit removes the drafts left unsent, which may hold embargoed details, then quits.
+func (m Model) quit() tea.Cmd {
+	var paths []string
+	for _, d := range m.drafts {
+		paths = append(paths, d.path)
+	}
+	return func() tea.Msg {
+		for _, path := range paths {
+			_ = os.Remove(path)
+		}
+		return tea.QuitMsg{}
+	}
+}
+
 func (m *Model) discard(id string) {
 	if d, ok := m.drafts[id]; ok {
 		_ = os.Remove(d.path)

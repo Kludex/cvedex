@@ -39,6 +39,20 @@ type Name struct {
 	Last  string `json:"last"`
 }
 
+// Quota is how many CVE IDs the org may hold in the RESERVED state, and how many it does.
+type Quota struct {
+	Quota     int `json:"id_quota"`
+	Reserved  int `json:"total_reserved"`
+	Available int `json:"available"`
+}
+
+// Quota returns the client's org's ID quota and its use.
+func (c *Client) Quota(ctx context.Context) (*Quota, error) {
+	var quota Quota
+	err := c.Do(ctx, http.MethodGet, c.orgPath()+"/id_quota", nil, nil, &quota)
+	return &quota, err
+}
+
 // Org returns the client's org.
 func (c *Client) Org(ctx context.Context) (*Org, error) {
 	var org Org
@@ -87,6 +101,43 @@ func (c *Client) AddUser(ctx context.Context, user User) (*User, error) {
 	}
 	err := c.Do(ctx, http.MethodPost, c.orgPath()+"/user", nil, body, &out)
 	return &out.Created, err
+}
+
+// UserUpdate changes a user. Zero fields are left as they are.
+type UserUpdate struct {
+	// Active deactivates a user when false. A deactivated user's key stops working.
+	Active      *bool
+	First       string
+	Last        string
+	NewUsername string
+	// AddRole and RemoveRole take ADMIN, the only role CVE Services lets an org admin change.
+	AddRole    string
+	RemoveRole string
+}
+
+// UpdateUser changes a user of the client's org and returns it. Users can change their own name;
+// only an org admin can change the rest.
+func (c *Client) UpdateUser(ctx context.Context, username string, update UserUpdate) (*User, error) {
+	query := url.Values{}
+	if update.Active != nil {
+		query.Set("active", strconv.FormatBool(*update.Active))
+	}
+	for name, value := range map[string]string{
+		"name.first":          update.First,
+		"name.last":           update.Last,
+		"new_username":        update.NewUsername,
+		"active_roles.add":    update.AddRole,
+		"active_roles.remove": update.RemoveRole,
+	} {
+		if value != "" {
+			query.Set(name, value)
+		}
+	}
+	var out struct {
+		Updated User `json:"updated"`
+	}
+	err := c.Do(ctx, http.MethodPut, c.orgPath()+"/user/"+url.PathEscape(username), query, nil, &out)
+	return &out.Updated, err
 }
 
 // ResetKey issues a new API key for a user of the client's org and returns it. The old key stops

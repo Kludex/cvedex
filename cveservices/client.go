@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -79,49 +80,46 @@ func (p *PendingApproval) Error() string {
 	return "waiting for approval as proposal " + p.ProposalID
 }
 
-const maxBody = 16 << 20
+const (
+	maxBody = 16 << 20
+	// retries is how many times a rate-limited request is sent again.
+	retries = 3
+)
 
 // Do sends one request and decodes a JSON response into out, which may be nil. A status of 300
-// or more returns an *Error, and a cvedexd proposal returns a *PendingApproval.
+// or more returns an *Error, and a cvedexd proposal returns a *PendingApproval. A rate-limited
+// request is sent again up to three times, after the wait the server asks for, of a minute at most.
 func (c *Client) Do(ctx context.Context, method, path string, query url.Values, body, out any) error {
-	var payload io.Reader
+	var payload []byte
 	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
+		var err error
+		if payload, err = json.Marshal(body); err != nil {
 			return err
 		}
-		payload = bytes.NewReader(data)
 	}
 	target := strings.TrimRight(c.Credentials.URL, "/") + path
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, method, target, payload)
+	resp, err := c.send(ctx, method, target, payload)
+	for attempt := 0; err == nil && resp.status == http.StatusTooManyRequests && attempt < retries; attempt++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(min(resp.retryAfter, time.Minute)):
+		}
+		resp, err = c.send(ctx, method, target, payload)
+	}
 	if err != nil {
 		return err
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("User-Agent", "cvedex")
-	req.Header.Set("CVE-API-ORG", c.Credentials.Org)
-	req.Header.Set("CVE-API-USER", c.Credentials.User)
-	req.Header.Set("CVE-API-KEY", c.Credentials.Key)
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode >= http.StatusMultipleChoices {
-		e := &Error{Status: resp.StatusCode, Body: data}
+	data := resp.body
+	if resp.status >= http.StatusMultipleChoices {
+		e := &Error{Status: resp.status, Body: data}
 		_ = json.Unmarshal(data, e)
 		return e
 	}
-	if resp.StatusCode == http.StatusAccepted {
+	if resp.status == http.StatusAccepted {
 		var pending PendingApproval
 		if json.Unmarshal(data, &pending) == nil && pending.ProposalID != "" {
 			return &pending
@@ -131,4 +129,42 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		return nil
 	}
 	return json.Unmarshal(data, out)
+}
+
+type response struct {
+	status     int
+	body       []byte
+	retryAfter time.Duration
+}
+
+func (c *Client) send(ctx context.Context, method, target string, payload []byte) (response, error) {
+	var reader io.Reader
+	if payload != nil {
+		reader = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, reader)
+	if err != nil {
+		return response{}, err
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("User-Agent", "cvedex")
+	req.Header.Set("CVE-API-ORG", c.Credentials.Org)
+	req.Header.Set("CVE-API-USER", c.Credentials.User)
+	req.Header.Set("CVE-API-KEY", c.Credentials.Key)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return response{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return response{}, err
+	}
+	wait, err := strconv.Atoi(resp.Header.Get("Retry-After"))
+	if err != nil {
+		wait = 1
+	}
+	return response{resp.StatusCode, data, time.Duration(wait) * time.Second}, nil
 }

@@ -75,7 +75,13 @@ func TestCommands(t *testing.T) {
 		}
 	}
 	review := `{"cves":[{"cve_id":"CVE-2026-1100","submitter":"bob","updated_at":"2026-10-22T10:00:00Z",` +
-		`"record":{"cnaContainer":{"title":"Path traversal in widget"}}}]}`
+		`"action":"publish","revision":2,"previous":{"cnaContainer":{"title":"Traversal"}},"published":null,` +
+		`"record":{"cnaContainer":{"title":"Path traversal in widget","x_hidden":"\u001b]0;pwned\u0007"}}}]}`
+	reviewUpdate := `{"cves":[{"cve_id":"CVE-2026-1100","submitter":"bob","action":"reject","revision":3,` +
+		`"previous":null,"published":{"cnaContainer":{"title":"Path traversal"}},` +
+		`"record":{"cnaContainer":{"rejectedReasons":[{"lang":"en","value":"Duplicate."}]}}}]}`
+	reviewNew := `{"cves":[{"cve_id":"CVE-2026-1100","submitter":"bob","action":"publish","revision":1,` +
+		`"previous":null,"published":null,"record":{"cnaContainer":{"title":"Fresh"}}}]}`
 
 	tests := []struct {
 		name      string
@@ -181,7 +187,7 @@ func TestCommands(t *testing.T) {
 				Status: 202, Response: `{"proposal_id":"p1"}`}},
 			args:   []string{"reserve", "--year", "2026"},
 			code:   1,
-			stderr: []string{"Waiting for approval as proposal p1", "cvedex proposals approve p1"},
+			stderr: []string{"Waiting for approval as proposal p1", "cvedex proposals show p1"},
 		},
 		{
 			name: "reserve several",
@@ -249,12 +255,27 @@ func TestCommands(t *testing.T) {
 			stdout: []string{"Updated CVE-2026-1100"},
 		},
 		{
-			name: "reject",
-			exchanges: []cassette.Exchange{{Method: "POST", Path: "/api/cve/CVE-2026-1100/reject",
-				Body:     `{"cnaContainer":{"rejectedReasons":[{"lang":"en","value":"Duplicate."}]}}`,
-				Response: `{"created":{"cveMetadata":{"cveId":"CVE-2026-1100","state":"REJECTED"}}}`}},
-			args:   []string{"reject", "CVE-2026-1100", "--reason", "Duplicate."},
-			stdout: []string{"Rejected CVE-2026-1100", "REJECTED"},
+			name:      "reject",
+			exchanges: []cassette.Exchange{cassette.Load(t, "cve-id-reserved"), cassette.Load(t, "reject")},
+			args:      []string{"reject", "CVE-2026-1107", "--reason", "cvedex fixture recording. Not a real ID."},
+			stdout:    []string{"Rejected CVE-2026-1107", "REJECTED"},
+		},
+		{
+			name: "reject a published ID",
+			exchanges: []cassette.Exchange{
+				cassette.Load(t, "cve-id-published"),
+				cassette.Load(t, "reject-published"),
+			},
+			args:   []string{"reject", "CVE-2026-1108", "--reason", "cvedex fixture recording. Not a real ID."},
+			stdout: []string{"Rejected CVE-2026-1108", "REJECTED"},
+		},
+		{
+			name: "reject an unknown ID",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/api/cve-id/CVE-2026-9", Status: 404,
+				Response: `{"error":"CVEID_NOT_FOUND","message":"The CVE ID does not exist."}`}},
+			args:   []string{"reject", "CVE-2026-9", "--reason", "Duplicate."},
+			code:   1,
+			stderr: []string{"(CVEID_NOT_FOUND)"},
 		},
 		{
 			name:   "reject without a reason",
@@ -263,11 +284,115 @@ func TestCommands(t *testing.T) {
 			stderr: []string{"--reason is required"},
 		},
 		{
+			name:      "reject only the ID",
+			exchanges: []cassette.Exchange{cassette.Load(t, "id-state-rejected")},
+			args:      []string{"reject", "CVE-2026-1107", "--id-only"},
+			stdout:    []string{"CVE-2026-1107 is REJECTED", "cvedex list --state rejected"},
+		},
+		{
+			name:      "unreject",
+			exchanges: []cassette.Exchange{cassette.Load(t, "id-state-reserved")},
+			args:      []string{"unreject", "2026-1107", "--json"},
+			stdout:    []string{`"state": "RESERVED"`},
+		},
+		{
+			name:   "unreject on production without a terminal",
+			args:   []string{"unreject", "CVE-2026-1107", "--url", "https://cveawg.mitre.org"},
+			code:   1,
+			stderr: []string{"unreject needs --yes"},
+		},
+		{
+			name: "unreject an ID that was not rejected",
+			exchanges: []cassette.Exchange{{Method: "PUT", Path: "/api/cve-id/CVE-2026-1107?state=RESERVED", Status: 400,
+				Response: `{"error":"BAD_INPUT","message":"Bad state"}`}},
+			args:   []string{"unreject", "CVE-2026-1107"},
+			code:   1,
+			stderr: []string{"Bad state (BAD_INPUT)"},
+		},
+		{
+			name:      "adp without the ADP role",
+			exchanges: []cassette.Exchange{cassette.Load(t, "adp-forbidden")},
+			args:      []string{"adp", "CVE-2026-1108", "-"},
+			stdin:     `{"adpContainer":{"title":"cvedex fixture recording"}}`,
+			code:      1,
+			stderr:    []string{"This function is only allowed for ADPs. (ADP_ONLY)"},
+		},
+		{
+			name: "adp",
+			exchanges: []cassette.Exchange{{Method: "PUT", Path: "/api/cve/CVE-2026-1108/adp",
+				Body:     `{"adpContainer":{"title":"Enriched"}}`,
+				Response: `{"updated":{"cveMetadata":{"cveId":"CVE-2026-1108","state":"PUBLISHED"}}}`}},
+			args:   []string{"adp", "CVE-2026-1108", "-"},
+			stdin:  `{"title":"Enriched"}`,
+			stdout: []string{"Updated CVE-2026-1108"},
+		},
+		{name: "adp a file that is not JSON", args: []string{"adp", "CVE-2026-1108", broken}, code: 1,
+			stderr: []string{"broken.json is not a JSON object"}},
+		{name: "adp a missing file", args: []string{"adp", "CVE-2026-1108", filepath.Join(dir, "missing.json")},
+			code: 1, stderr: []string{"no such file"}},
+		{
 			name:      "org",
 			exchanges: []cassette.Exchange{cassette.Load(t, "org")},
 			args:      []string{"org"},
 			stdout:    []string{"acme", "Roles", "ID quota"},
 		},
+		{
+			name:      "org quota",
+			exchanges: []cassette.Exchange{cassette.Load(t, "id-quota")},
+			args:      []string{"org", "quota"},
+			stdout:    []string{"Quota", "1000", "Reserved", "2", "Available", "998"},
+		},
+		{
+			name: "org quota failing",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/api/org/acme/id_quota", Status: 500,
+				Response: `{"message":"Quota lookup failed"}`}},
+			args:   []string{"org", "quota"},
+			code:   1,
+			stderr: []string{"Quota lookup failed"},
+		},
+		{
+			name:      "org update-user",
+			exchanges: []cassette.Exchange{cassette.Load(t, "user-update")},
+			args:      []string{"org", "update-user", "alice@acme.test", "--first", "acme"},
+			stdout:    []string{"Updated alice@acme.test"},
+		},
+		{
+			name: "org update-user deactivates and drops the admin role",
+			exchanges: []cassette.Exchange{{Method: "PUT", Path: "/api/org/acme/user/bob@acme.test?active=false&" +
+				"active_roles.remove=ADMIN&name.last=Jones&new_username=robert@acme.test",
+				Response: `{"updated":{"username":"robert@acme.test"}}`}},
+			args: []string{"org", "update-user", "bob@acme.test", "--active=false", "--admin=false", "--last", "Jones",
+				"--username", "robert@acme.test"},
+			stdout: []string{"Updated robert@acme.test"},
+		},
+		{
+			name: "org update-user with a new username",
+			exchanges: []cassette.Exchange{{Method: "PUT", Path: "/api/org/acme/user/bob%40acme.test?new_username=" +
+				"robert%40acme.test", Response: `{"updated":{"username":"robert@acme.test"}}`}},
+			args:   []string{"org", "update-user", "bob@acme.test", "--username", "robert@acme.test", "--json"},
+			stdout: []string{`"username": "robert@acme.test"`},
+		},
+		{
+			name: "org update-user makes an admin",
+			exchanges: []cassette.Exchange{{Method: "PUT", Path: "/api/org/acme/user/bob@acme.test?active=true&" +
+				"active_roles.add=ADMIN", Status: 403, Response: `{"error":"NOT_ORG_ADMIN","message":"Admins only."}`}},
+			args:   []string{"org", "update-user", "bob@acme.test", "--active", "--admin"},
+			code:   1,
+			stderr: []string{"Admins only. (NOT_ORG_ADMIN)"},
+		},
+		{name: "org update-user without changes", args: []string{"org", "update-user", "bob@acme.test"}, code: 1,
+			stderr: []string{"nothing to change"}},
+		{
+			name: "list filtered",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/api/cve-id?cve_id_year=2026&" +
+				"time_modified.lt=2026-10-31T12%3A00%3A00Z&time_reserved.gt=2026-01-01T00%3A00%3A00Z",
+				Response: `{"cve_ids":[{"cve_id":"CVE-2026-1"}]}`}},
+			args: []string{"list", "--year", "2026", "--reserved-after", "2026-01-01",
+				"--modified-before", "2026-10-31T12:00:00Z"},
+			stdout: []string{"CVE-2026-1"},
+		},
+		{name: "list from a bad date", args: []string{"list", "--modified-after", "yesterday"}, code: 1,
+			stderr: []string{`"yesterday" is not a date such as 2026-10-31`}},
 		{
 			name: "org users",
 			exchanges: []cassette.Exchange{
@@ -365,7 +490,7 @@ func TestCommands(t *testing.T) {
 			name:      "review",
 			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/review", Response: review}),
 			args:      []string{"review"},
-			stdout:    []string{"CVE-2026-1100", "bob", "2026-10-22", "Path traversal in widget"},
+			stdout:    []string{"CVE-2026-1100", "publish", "2", "bob", "2026-10-22", "Path traversal in widget"},
 		},
 		{
 			name:      "review empty",
@@ -377,7 +502,23 @@ func TestCommands(t *testing.T) {
 			name:      "review show",
 			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/review", Response: review}),
 			args:      []string{"review", "show", "2026-1100"},
-			stdout:    []string{"CVE-2026-1100", "from bob", "Path traversal in widget"},
+			stdout: []string{"CVE-2026-1100", "revision 2 from bob, asking to publish", "Path traversal in widget",
+				"Changes since the revision before", `-    "title": "Traversal"`,
+				`+    "title": "Path traversal in widget"`, "Full record", `"x_hidden": "\u001b]0;pwned\u0007"`,
+				"cvedex review approve CVE-2026-1100 --revision 2"},
+		},
+		{
+			name:      "review show an update",
+			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/review", Response: reviewUpdate}),
+			args:      []string{"review", "show", "2026-1100"},
+			stdout: []string{"revision 3 from bob, asking to reject", "Changes from the published record",
+				`-    "title": "Path traversal"`, `+    "rejectedReasons": [`},
+		},
+		{
+			name:      "review show a first revision",
+			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/review", Response: reviewNew}),
+			args:      []string{"review", "show", "2026-1100"},
+			stdout:    []string{"revision 1 from bob", "Full record"},
 		},
 		{
 			name:      "review show an ID not in review",
@@ -389,15 +530,25 @@ func TestCommands(t *testing.T) {
 		{
 			name: "review approve",
 			exchanges: cvedexd(cassette.Exchange{Method: "POST", Path: "/api/cvedexd/cve/CVE-2026-1100/approve",
-				Response: `{"created":{"cveMetadata":{"cveId":"CVE-2026-1100","state":"PUBLISHED"}}}`}),
-			args:   []string{"review", "approve", "CVE-2026-1100"},
-			stdout: []string{"Published CVE-2026-1100"},
+				Body: `{"revision":2}`, Response: `{"created":{"cveMetadata":{"cveId":"CVE-2026-1100","state":"PUBLISHED"}}}`}),
+			args:   []string{"review", "approve", "CVE-2026-1100", "--revision", "2"},
+			stdout: []string{"Approved CVE-2026-1100", "PUBLISHED"},
+		},
+		{
+			name: "review approve a changed record",
+			exchanges: cvedexd(cassette.Exchange{Method: "POST", Path: "/api/cvedexd/cve/CVE-2026-1100/approve",
+				Body: `{"revision":1}`, Status: 409,
+				Response: `{"error":"STALE_REVISION","message":"CVE-2026-1100 changed since revision 1"}`}),
+			args:   []string{"review", "approve", "CVE-2026-1100", "--revision", "1"},
+			code:   1,
+			stderr: []string{"(STALE_REVISION)"},
 		},
 		{
 			name: "review request-changes",
 			exchanges: cvedexd(cassette.Exchange{Method: "POST", Path: "/api/cvedexd/cve/CVE-2026-1100/request-changes",
-				Body: `{"note":"Add the CWE."}`, Response: `{"cve_id":"CVE-2026-1100","state":"reserved","note":"Add the CWE."}`}),
-			args:   []string{"review", "request-changes", "CVE-2026-1100", "Add the CWE."},
+				Body:     `{"note":"Add the CWE.","revision":2}`,
+				Response: `{"cve_id":"CVE-2026-1100","state":"reserved","note":"Add the CWE."}`}),
+			args:   []string{"review", "request-changes", "CVE-2026-1100", "Add the CWE.", "--revision", "2"},
 			stdout: []string{"Sent CVE-2026-1100 back to its submitter."},
 		},
 		{
@@ -407,7 +558,36 @@ func TestCommands(t *testing.T) {
 					`{"id":"p1","method":"POST","path":"/api/cve-id?amount=1","body":null,"created_at":"2026-10-22T10:00:00Z"}]}`},
 			),
 			args:   []string{"proposals"},
-			stdout: []string{"p1", "POST /api/cve-id?amount=1", "2026-10-22"},
+			stdout: []string{"p1", "POST /api/cve-id?amount=1", "2026-10-22", "cvedex proposals show <id>"},
+		},
+		{
+			name: "proposals show",
+			exchanges: cvedexd(
+				cassette.Exchange{Method: "GET", Path: "/api/cvedexd/proposals", Response: `{"proposals":[` +
+					`{"id":"p1","method":"POST","path":"/api/cve-id?amount=1","body":null,"created_at":"2026-10-22T10:00:00Z"},` +
+					`{"id":"p2","method":"POST","path":"/api/cve/CVE-2026-1/cna",` +
+					`"body":"{\"cnaContainer\":{\"title\":\"Overflow\"}}","created_at":"2026-10-22T11:00:00Z"}]}`},
+			),
+			args:   []string{"proposals", "show", "p2"},
+			stdout: []string{"POST /api/cve/CVE-2026-1/cna", "proposed 2026-10-22", `"title": "Overflow"`},
+		},
+		{
+			name: "proposals show a body that is not JSON",
+			exchanges: cvedexd(
+				cassette.Exchange{Method: "GET", Path: "/api/cvedexd/proposals", Response: `{"proposals":[` +
+					`{"id":"p1","method":"POST","path":"/api/cve-id","body":"not json\u001b[2J"}]}`},
+			),
+			args:   []string{"proposals", "show", "p1"},
+			stdout: []string{`not json\x1b[2J`},
+		},
+		{
+			name: "proposals show one not pending",
+			exchanges: cvedexd(
+				cassette.Exchange{Method: "GET", Path: "/api/cvedexd/proposals", Response: `{"proposals":[]}`},
+			),
+			args:   []string{"proposals", "show", "p9"},
+			code:   1,
+			stderr: []string{"no pending proposal p9"},
 		},
 		{
 			name: "proposals empty",
@@ -446,16 +626,118 @@ func TestCommands(t *testing.T) {
 			exchanges: cvedexd(
 				cassette.Exchange{
 					Method: "GET",
-					Path:   "/api/cvedexd/audit?since=2026-01-01&user=bob",
-					Response: `{"audit":[` +
-						`{"id":1,"ts":"2026-10-22T10:00:00.000Z","actor":"bob","actor_kind":"agent",` +
+					Path:   "/api/cvedexd/audit?before=9&since=2026-01-01&user=bob",
+					Response: `{"next":1,"audit":[` +
+						`{"id":3,"ts":"2026-10-22T10:00:00.000Z","actor":"bob","actor_kind":"agent",` +
 						`"method":"POST","path":"/api/cve-id","status":202},` +
-						`{"id":2,"ts":"2026-10-22T10:01:00.000Z","actor":null,"actor_kind":null,` +
-						`"method":"GET","path":"/api/cve-id","status":401}]}`,
+						`{"id":2,"ts":"2026-10-22T10:01:00.000Z","actor":"bob","actor_kind":"user",` +
+						`"method":"GET","path":"/api/cve-id","status":403},` +
+						`{"id":1,"ts":"2026-10-22T10:02:00.000Z","actor":"bob","actor_kind":"user",` +
+						`"method":"GET","path":"/api/cve-id","status":null}]}`,
 				},
 			),
-			args:   []string{"audit", "--user", "bob", "--since", "2026-01-01"},
-			stdout: []string{"2026-10-22 10:00:00", "bob", "agent", "POST /api/cve-id", "202", "401"},
+			args: []string{"audit", "--user", "bob", "--since", "2026-01-01", "--before", "9"},
+			stdout: []string{"2026-10-22 10:00:00", "bob", "agent", "POST /api/cve-id", "202", "403", "?",
+				"Older entries: cvedex audit --before 1"},
+		},
+		{
+			name: "submitter list",
+			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/submitters",
+				Response: `{"submitters":[{"id":1,"name":"bob","created_at":"2026-10-01T00:00:00Z","disabled_at":null,` +
+					`"open_ids":2,"tokens":1},{"id":2,"name":"eve","created_at":"2026-10-02T00:00:00Z",` +
+					`"disabled_at":"2026-10-03T00:00:00Z","open_ids":0,"tokens":0}]}`}),
+			args:   []string{"submitter"},
+			stdout: []string{"OPEN IDS", "bob", "enabled", "2026-10-01", "eve", "disabled"},
+		},
+		{
+			name: "submitter list empty",
+			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/submitters",
+				Response: `{"submitters":[]}`}),
+			args:   []string{"submitter"},
+			stdout: []string{"No submitters. Add one with cvedex submitter add <name>."},
+		},
+		{
+			name: "submitter list forbidden",
+			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/submitters", Status: 403,
+				Response: `{"error":"NOT_ALLOWED","message":"CNA users only"}`}),
+			args:   []string{"submitter"},
+			code:   1,
+			stderr: []string{"CNA users only"},
+		},
+		{
+			name: "submitter disable",
+			exchanges: cvedexd(cassette.Exchange{Method: "POST", Path: "/api/cvedexd/submitters/2/disable",
+				Response: `{"id":2,"name":"eve","disabled_at":"2026-10-03T00:00:00Z"}`}),
+			args:   []string{"submitter", "disable", "2"},
+			stdout: []string{"eve is disabled."},
+		},
+		{
+			name: "submitter enable",
+			exchanges: cvedexd(cassette.Exchange{Method: "POST", Path: "/api/cvedexd/submitters/2/enable", Status: 404,
+				Response: `{"error":"SUBMITTER_NOT_FOUND","message":"No such submitter"}`}),
+			args:   []string{"submitter", "enable", "2"},
+			code:   1,
+			stderr: []string{"(SUBMITTER_NOT_FOUND)"},
+		},
+		{name: "submitter enable a bad ID", exchanges: cvedexd(), args: []string{"submitter", "enable", "eve"},
+			code: 1, stderr: []string{`submitter ID must be a number, not "eve"`}},
+		{
+			name: "submitter tokens",
+			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/submitters/1/tokens",
+				Response: `{"tokens":[{"id":4,"kind":"agent","created_at":"2026-10-01T00:00:00Z",` +
+					`"last_used_at":"2026-10-05T00:00:00Z","revoked_at":"2026-10-06T00:00:00Z"},` +
+					`{"id":5,"kind":"user","created_at":"2026-10-07T00:00:00Z","last_used_at":null,"revoked_at":null}]}`}),
+			args:   []string{"submitter", "tokens", "1"},
+			stdout: []string{"LAST USED", "4", "agent", "2026-10-01", "2026-10-05", "2026-10-06"},
+		},
+		{
+			name: "submitter tokens failing",
+			exchanges: cvedexd(cassette.Exchange{Method: "GET", Path: "/api/cvedexd/submitters/1/tokens", Status: 404,
+				Response: `{"error":"SUBMITTER_NOT_FOUND","message":"No such submitter"}`}),
+			args:   []string{"submitter", "tokens", "1"},
+			code:   1,
+			stderr: []string{"(SUBMITTER_NOT_FOUND)"},
+		},
+		{name: "submitter tokens of a bad ID", exchanges: cvedexd(), args: []string{"submitter", "tokens", "bob"},
+			code: 1, stderr: []string{`submitter ID must be a number, not "bob"`}},
+		{
+			name: "submitter revoke",
+			exchanges: cvedexd(cassette.Exchange{Method: "DELETE", Path: "/api/cvedexd/tokens/4",
+				Response: `{"id":4,"kind":"agent","revoked_at":"2026-10-06T00:00:00Z"}`}),
+			args:   []string{"submitter", "revoke", "4"},
+			stdout: []string{"Revoked token 4."},
+		},
+		{
+			name: "submitter revoke failing",
+			exchanges: cvedexd(cassette.Exchange{Method: "DELETE", Path: "/api/cvedexd/tokens/4", Status: 404,
+				Response: `{"error":"NOT_FOUND","message":"No such token"}`}),
+			args:   []string{"submitter", "revoke", "4"},
+			code:   1,
+			stderr: []string{"No such token"},
+		},
+		{name: "submitter revoke a bad ID", exchanges: cvedexd(), args: []string{"submitter", "revoke", "four"},
+			code: 1, stderr: []string{`token ID must be a number, not "four"`}},
+		{
+			name: "show a record with terminal escapes",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/api/cve/CVE-2026-1300", Response: `{` +
+				`"cveMetadata":{"cveId":"CVE-2026-1300","state":"PUBLISHED"},"containers":{"cna":{` +
+				`"title":"\u001b]0;pwned\u0007Overflow\u202e","references":[{"url":"https://x\u001b[8m.test"}]}}}`}},
+			args:   []string{"show", "2026-1300"},
+			stdout: []string{`\x1b]0;pwned\x07Overflow\u202e`, `https://x\x1b[8m.test`},
+		},
+		{
+			name: "error with terminal escapes",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/api/cve/CVE-2026-1300", Status: 500,
+				Response: `{"message":"\u001b[2Jgone"}`}},
+			args:   []string{"show", "2026-1300"},
+			code:   1,
+			stderr: []string{`Error: \x1b[2Jgone`},
+		},
+		{
+			name:   "plain HTTP",
+			args:   []string{"list", "--url", "http://cve.example"},
+			code:   1,
+			stderr: []string{"http://cve.example would send your API key unencrypted; use https://"},
 		},
 		{
 			name: "submitter add",
@@ -730,9 +1012,11 @@ func TestAPIErrors(t *testing.T) {
 		{cvedexd, []string{"status"}},
 		{cvedexd, []string{"review"}},
 		{cvedexd, []string{"review", "show", "CVE-2026-1100"}},
-		{cvedexd, []string{"review", "approve", "CVE-2026-1100"}},
-		{cvedexd, []string{"review", "request-changes", "CVE-2026-1100", "Add a CWE."}},
+		{cvedexd, []string{"review", "approve", "CVE-2026-1100", "--revision", "1"}},
+		{cvedexd, []string{"review", "request-changes", "CVE-2026-1100", "Add a CWE.", "--revision", "1"}},
 		{cvedexd, []string{"proposals"}},
+		{cvedexd, []string{"proposals", "show", "p1"}},
+		{cvedexd, []string{"submitter", "disable", "1"}},
 		{cvedexd, []string{"proposals", "approve", "p1"}},
 		{cvedexd, []string{"proposals", "deny", "p1"}},
 		{cvedexd, []string{"audit"}},
@@ -906,6 +1190,10 @@ func TestLoginForm(t *testing.T) {
 	term.waitFor("> Another server")
 	term.send("\r")
 	term.waitFor("Server URL")
+	time.Sleep(200 * time.Millisecond)
+	term.send("\x15http://cve.example\r")
+	term.waitFor("use https://")
+	term.send("\x15" + url)
 	// huh moves focus asynchronously, so each answer waits for the previous one to land.
 	for _, answer := range []string{"", "", " acme", "alice@acme.test ", "the-key"} {
 		time.Sleep(200 * time.Millisecond)

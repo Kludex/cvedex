@@ -18,15 +18,15 @@ import (
 
 func connect(t *testing.T, exchanges ...cassette.Exchange) *mcp.ClientSession {
 	t.Helper()
-	return connectTo(t, cassette.Serve(t, exchanges...))
+	return connectTo(t, cassette.Serve(t, exchanges...), false)
 }
 
-func connectTo(t *testing.T, url string) *mcp.ClientSession {
+func connectTo(t *testing.T, url string, readOnly bool) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
 	client := cveservices.New(cveservices.Credentials{URL: url, Org: "acme", User: "alice@acme.test", Key: "key"})
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	if _, err := mcpserver.New(client, "test").Connect(ctx, serverTransport, nil); err != nil {
+	if _, err := mcpserver.New(client, "test", readOnly).Connect(ctx, serverTransport, nil); err != nil {
 		t.Fatal(err)
 	}
 	session, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, clientTransport, nil)
@@ -38,23 +38,29 @@ func connectTo(t *testing.T, url string) *mcp.ClientSession {
 }
 
 func TestTools(t *testing.T) {
-	tools, err := connect(t).ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		readOnly bool
+		want     []string
+	}{
+		{want: []string{"list_cves", "publish_cve", "reject_cve", "reserve_ids", "show_cve", "update_cve"}},
+		{readOnly: true, want: []string{"list_cves", "show_cve"}},
 	}
-	var names []string
-	for _, tool := range tools.Tools {
-		names = append(names, tool.Name)
-		if tool.Annotations == nil {
-			t.Errorf("%s has no annotations", tool.Name)
+	for _, tt := range tests {
+		tools, err := connectTo(t, cassette.Serve(t), tt.readOnly).ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	slices.Sort(names)
-	if want := []string{"list_cves", "publish_cve", "reserve_ids", "show_cve", "update_cve"}; !slices.Equal(
-		names,
-		want,
-	) {
-		t.Errorf("tools %v, want %v", names, want)
+		var names []string
+		for _, tool := range tools.Tools {
+			names = append(names, tool.Name)
+			if tool.Annotations == nil {
+				t.Errorf("%s has no annotations", tool.Name)
+			}
+		}
+		slices.Sort(names)
+		if !slices.Equal(names, tt.want) {
+			t.Errorf("read-only %v: tools %v, want %v", tt.readOnly, names, tt.want)
+		}
 	}
 }
 
@@ -68,6 +74,7 @@ func TestCallTool(t *testing.T) {
 	}
 	tests := []struct {
 		name     string
+		prior    []cassette.Exchange
 		exchange cassette.Exchange
 		tool     string
 		args     map[string]any
@@ -81,6 +88,14 @@ func TestCallTool(t *testing.T) {
 			args:     map[string]any{},
 			want:     `"cve_id":"CVE-2026-1100"`,
 		},
+		{name: "list a year", tool: "list_cves", args: map[string]any{"state": "RESERVED", "year": 2026},
+			exchange: cassette.Exchange{
+				Method:   "GET",
+				Path:     "/api/cve-id?cve_id_year=2026&state=RESERVED",
+				Status:   200,
+				Response: `{"cve_ids":[{"cve_id":"CVE-2026-1101","state":"RESERVED"}]}`,
+			},
+			want: `"cve_id":"CVE-2026-1101"`},
 		{
 			name:     "show",
 			exchange: cassette.Load(t, "cve-2025-0001"),
@@ -120,12 +135,16 @@ func TestCallTool(t *testing.T) {
 				Status: 500,
 			},
 			isError: true, want: "HTTP 500"},
+		{name: "reject", tool: "reject_cve", prior: []cassette.Exchange{cassette.Load(t, "cve-id-reserved")},
+			exchange: cassette.Load(t, "reject"),
+			args:     map[string]any{"cve_id": "CVE-2026-1107", "reason": "cvedex fixture recording. Not a real ID."},
+			want:     `"state":"REJECTED"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			res, err := connect(
 				t,
-				tt.exchange,
+				append(tt.prior, tt.exchange)...,
 			).CallTool(context.Background(), &mcp.CallToolParams{Name: tt.tool, Arguments: tt.args})
 			if err != nil {
 				t.Fatal(err)
@@ -141,7 +160,7 @@ func TestCallTool(t *testing.T) {
 func TestServerDown(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	server.Close()
-	res, err := connectTo(t, server.URL).CallTool(context.Background(), &mcp.CallToolParams{Name: "list_cves"})
+	res, err := connectTo(t, server.URL, false).CallTool(context.Background(), &mcp.CallToolParams{Name: "list_cves"})
 	if err != nil {
 		t.Fatal(err)
 	}

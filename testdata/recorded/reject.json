@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/cve/CVE-2026-1107/reject",
+    "body": "{\"cnaContainer\":{\"rejectedReasons\":[{\"lang\":\"en\",\"value\":\"cvedex fixture recording. Not a real ID.\"}]}}"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store",
+      "content-type": "application/json; charset=utf-8"
+    },
+    "body": "{\"message\":\"CVE-2026-1107 record was successfully submitted.\",\"created\":{\"dataType\":\"CVE_RECORD\",\"dataVersion\":\"5.2\",\"cveMetadata\":{\"cveId\":\"CVE-2026-1107\",\"assignerOrgId\":\"6f1e6c5e-2b1f-4a8a-9d3e-0c5f8f1a2b3c\",\"state\":\"REJECTED\",\"dateReserved\":\"2026-10-23T12:52:06.918Z\",\"dateUpdated\":\"2026-10-23T12:52:07.741Z\",\"dateRejected\":\"2026-10-23T12:52:07.741Z\",\"assignerShortName\":\"acme\"},\"containers\":{\"cna\":{\"providerMetadata\":{\"orgId\":\"6f1e6c5e-2b1f-4a8a-9d3e-0c5f8f1a2b3c\",\"shortName\":\"acme\",\"dateUpdated\":\"2026-10-23T12:52:07.741Z\"},\"rejectedReasons\":[{\"lang\":\"en\",\"value\":\"cvedex fixture recording. Not a real ID.\"}]}}},\"valid\":true,\"warnings\":[]}"
+  }
+}

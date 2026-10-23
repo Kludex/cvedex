@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -31,8 +32,29 @@ func (a *app) orgCommand() *cobra.Command {
 			})
 		},
 	}
-	cmd.AddCommand(a.usersCommand(), a.addUserCommand(), a.resetKeyCommand())
+	cmd.AddCommand(a.quotaCommand(), a.usersCommand(), a.addUserCommand(), a.updateUserCommand(), a.resetKeyCommand())
 	return cmd
+}
+
+func (a *app) quotaCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "quota",
+		Short: "Show how many CVE IDs your CNA may still reserve",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			quota, err := a.client.Quota(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return a.output(quota, func() string {
+				return strings.Join([]string{
+					render.Label.Render("Quota") + fmt.Sprint(quota.Quota),
+					render.Label.Render("Reserved") + fmt.Sprint(quota.Reserved),
+					render.Label.Render("Available") + fmt.Sprint(quota.Available),
+				}, "\n")
+			})
+		},
+	}
 }
 
 func (a *app) usersCommand() *cobra.Command {
@@ -96,6 +118,45 @@ func (a *app) addUserCommand() *cobra.Command {
 	cmd.Flags().StringVar(&user.Name.First, "first", "", "first name")
 	cmd.Flags().StringVar(&user.Name.Last, "last", "", "last name")
 	cmd.Flags().BoolVar(&admin, "admin", false, "make the user an org admin")
+	return cmd
+}
+
+func (a *app) updateUserCommand() *cobra.Command {
+	var update cveservices.UserUpdate
+	var admin, active bool
+	cmd := &cobra.Command{
+		Use:   "update-user <username>",
+		Short: "Change a user's name, username, admin role or status",
+		Long: "Changes a user of your CNA. You can change your own name; only org admins can change the rest.\n" +
+			"A deactivated user's API key stops working until they are activated again.",
+		Example: "  cvedex org update-user bob@acme.org --last Jones\n" +
+			"  cvedex org update-user bob@acme.org --active=false",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := cmd.Flags()
+			if flags.Changed("admin") && admin {
+				update.AddRole = "ADMIN"
+			} else if flags.Changed("admin") {
+				update.RemoveRole = "ADMIN"
+			}
+			if flags.Changed("active") {
+				update.Active = &active
+			}
+			if update == (cveservices.UserUpdate{}) {
+				return errors.New("nothing to change; pass --first, --last, --username, --admin or --active")
+			}
+			user, err := a.client.UpdateUser(cmd.Context(), args[0], update)
+			if err != nil {
+				return err
+			}
+			return a.output(user, func() string { return render.Good.Render("Updated " + render.Clean(user.Username)) })
+		},
+	}
+	cmd.Flags().StringVar(&update.First, "first", "", "new first name")
+	cmd.Flags().StringVar(&update.Last, "last", "", "new last name")
+	cmd.Flags().StringVar(&update.NewUsername, "username", "", "new username")
+	cmd.Flags().BoolVar(&admin, "admin", false, "make the user an org admin, or not with --admin=false")
+	cmd.Flags().BoolVar(&active, "active", true, "activate the user, or deactivate with --active=false")
 	return cmd
 }
 

@@ -159,12 +159,15 @@ func TestCvedexd(t *testing.T) {
 	review := cassette.Exchange{
 		Method: "GET",
 		Path:   "/api/cvedexd/review",
-		Response: `{"cves":[{"cve_id":"CVE-2026-1100",` +
-			`"submitter":"bob","updated_at":"2026-10-22T10:00:00Z",` +
-			`"record":{"cnaContainer":{"title":"Path traversal in widget"}}}]}`,
+		Response: `{"cves":[{"cve_id":"CVE-2026-1100","action":"publish","revision":2,` +
+			`"submitter":"bob","updated_at":"2026-10-22T10:00:00Z","previous":{"cnaContainer":{"title":"Traversal"}},` +
+			`"record":{"cnaContainer":{"title":"Path traversal in widget"}}},` +
+			`{"cve_id":"CVE-2026-1101","action":"reject","revision":1,"submitter":"bob\u001b[2J",` +
+			`"record":{"cnaContainer":{"rejectedReasons":[{"lang":"en","value":"Unused."}]}}}]}`,
 	}
 	proposals := cassette.Exchange{Method: "GET", Path: "/api/cvedexd/proposals", Response: `{"proposals":[` +
-		`{"id":"p1","method":"POST","path":"/api/cve-id?amount=1","body":null,"created_at":"2026-10-22T10:00:00Z"}]}`}
+		`{"id":"p1","method":"POST","path":"/api/cve-id?amount=1","body":"{\"x\":1}",` +
+		`"created_at":"2026-10-22T10:00:00Z"}]}`}
 	s := start(
 		t,
 		health,
@@ -177,7 +180,8 @@ func TestCvedexd(t *testing.T) {
 				`"cvedexd":{"state":"in_review"}}]}`,
 		},
 		review,
-		cassette.Exchange{Method: "POST", Path: "/api/cvedexd/cve/CVE-2026-1100/approve", Response: `{"created":{}}`},
+		cassette.Exchange{Method: "POST", Path: "/api/cvedexd/cve/CVE-2026-1100/approve", Body: `{"revision":2}`,
+			Response: `{"created":{}}`},
 		cassette.Exchange{Method: "GET", Path: "/api/cvedexd/review", Response: `{"cves":[]}`},
 		proposals,
 		cassette.Exchange{
@@ -195,32 +199,34 @@ func TestCvedexd(t *testing.T) {
 		cassette.Exchange{Method: "GET", Path: "/api/cvedexd/audit", Response: `{"audit":[` +
 			`{"id":1,"ts":"2026-10-22T10:00:00.000Z","actor":"bob","actor_kind":"agent",` +
 			`"method":"POST","path":"/api/cve-id","status":202},` +
-			`{"id":2,"ts":"2026-10-22T10:01:00.000Z","actor":null,"actor_kind":null,` +
-			`"method":"GET","path":"/api/cve-id","status":401}]}`},
+			`{"id":2,"ts":"2026-10-22T10:01:00.000Z","actor":"bob","actor_kind":"user",` +
+			`"method":"GET","path":"/api/cve-id","status":null}],"next":null}`},
 		cassette.Exchange{Method: "GET", Path: "/api/cvedexd/proposals", Response: `{"proposals":[]}`},
 	)
 	s.shows("1 CVE IDs", "2 Review", "3 Proposals", "4 Audit", "RESERVED in_review", "tab switch")
 
 	s.press("tab")
-	s.shows("CVE-2026-1100", "bob", "Path traversal in widget", "a approve")
-	s.press("enter")
-	s.shows("Path traversal in widget", "esc back")
-	s.press("h", "a")
-	s.shows("Publish CVE-2026-1100 with your key? It will be public. y/n")
+	s.shows("CVE-2026-1100", "publish", "bob", "Path traversal in widget", "a approve", `bob\x1b[2J`)
+	s.press("down", "a")
+	s.shows("Reject CVE-2026-1101, revision 1, with your key? It will be public. y/n")
+	s.press("n", "up", "enter")
+	s.shows("revision 2 from bob, asking to publish", "Changes since the revision before", "a approve", "esc back")
+	s.press("a")
+	s.shows("Publish CVE-2026-1100, revision 2, with your key? It will be public. y/n")
 	s.press("y")
-	s.shows("Published CVE-2026-1100")
+	s.shows("Published CVE-2026-1100", "enter read")
 
 	s.press("tab")
 	s.shows("p1", "POST /api/cve-id?amount=1", "d deny")
 	s.press("enter")
-	s.shows("p1")
+	s.shows("POST /api/cve-id?amount=1  proposed 2026-10-22", `"x": 1`, "d deny")
 	s.press("a", "y")
-	s.shows("CVE Services is down (UPSTREAM)")
+	s.shows("CVE Services is down (UPSTREAM)", `"x": 1`)
 	s.press("d", "y")
-	s.shows("Denied proposal p1")
+	s.shows("Denied proposal p1", "enter read")
 
 	s.press("4")
-	s.shows("2026-10-22 10:00:00", "agent", "401")
+	s.shows("2026-10-22 10:00:00", "agent", "202", "?")
 	s.press("down", "shift+tab")
 	s.shows("Proposals")
 }
@@ -373,6 +379,9 @@ func TestEditReservedID(t *testing.T) {
 	}
 	pr.press("y", 'y')
 	pr.waitFor("press e to fix it", "INVALID_JSON_SCHEMA", "/cnaContainer:")
+	pr.press("q", 'q')
+	pr.waitFor("Quit and discard your unsent drafts? y/n")
+	pr.press("n", 'n')
 
 	pr.edit(string(sent.CNA))
 	pr.waitFor("Publish CVE-2026-1101?")
@@ -476,5 +485,33 @@ func TestEditFailures(t *testing.T) {
 	pr.waitFor(filepath.Join(tmp, "CVE-2026-1099-"))
 	if _, opened := pr.sawEditing(); !strings.Contains(opened, `"title": "Local draft"`) {
 		t.Errorf("container: %s", opened)
+	}
+}
+
+func TestQuitRemovesDrafts(t *testing.T) {
+	record := cassette.Load(t, "cve-2025-0001")
+	record.Path = "/api/cve/CVE-2026-1099"
+	for _, key := range []string{"q", "ctrl+c"} {
+		t.Run(key, func(t *testing.T) {
+			pr := runProgram(t, cassette.Load(t, "health-check"), cassette.Load(t, "cve-id-list"), record)
+			pr.waitFor("CVE-2026-1099")
+			pr.edit("not json")
+			pr.waitFor("CVE-2026-1099 is not valid JSON")
+			path, _ := pr.sawEditing()
+			if key == "q" {
+				pr.press("q", 'q')
+				pr.waitFor("Quit and discard your unsent drafts? y/n")
+				pr.press("y", 'y')
+			} else {
+				pr.p.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist); _, err = os.Stat(path) {
+				if time.Now().After(deadline) {
+					t.Fatalf("draft %s was not removed: %v", path, err)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		})
 	}
 }

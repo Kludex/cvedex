@@ -103,7 +103,9 @@ func (a *app) loginForm(cmd *cobra.Command, creds *cveservices.Credentials, choo
 			).
 			Value(&instance)).
 			WithHideFunc(func() bool { return !chooseURL }),
-		huh.NewGroup(huh.NewInput().Title("Server URL").Value(&custom).Validate(required)).
+		huh.NewGroup(huh.NewInput().Title("Server URL").Value(&custom).Validate(func(s string) error {
+			return checkURL(strings.TrimSpace(s))
+		})).
 			WithHideFunc(func() bool { return !chooseURL || instance != other }),
 		huh.NewGroup(
 			huh.NewInput().Title("CNA short name").Value(&creds.Org).Validate(required),

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Kludex/cvedex/cveservices"
 )
@@ -66,6 +67,47 @@ func TestDoErrors(t *testing.T) {
 			err := client.Do(context.Background(), tt.method, tt.path, nil, tt.body, nil)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("got %v, want an error containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRetryRateLimited(t *testing.T) {
+	tests := []struct {
+		name       string
+		retryAfter string
+		limited    int
+		cancel     bool
+		want       string
+	}{
+		{name: "recovers", retryAfter: "0", limited: 2},
+		{name: "default wait", limited: 1},
+		{name: "gives up", retryAfter: "0", limited: 10, want: "HTTP 429 Too Many Requests"},
+		{name: "cancelled", retryAfter: "30", limited: 1, cancel: true, want: "context canceled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				if calls > tt.limited {
+					_, _ = io.WriteString(w, `{}`)
+					return
+				}
+				if tt.retryAfter != "" {
+					w.Header().Set("Retry-After", tt.retryAfter)
+				}
+				if tt.cancel {
+					time.AfterFunc(100*time.Millisecond, cancel)
+				}
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			t.Cleanup(server.Close)
+			err := cveservices.New(cveservices.Credentials{URL: server.URL}).Do(ctx, "GET", "/", nil, nil, nil)
+			if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
+				t.Errorf("got %v, want %q", err, tt.want)
 			}
 		})
 	}

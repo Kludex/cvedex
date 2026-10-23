@@ -156,7 +156,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case noRecord(msg.err):
 			m.err, m.flash = nil, msg.id+" has no record yet. Press e to write one."
 		case msg.err == nil:
-			m.open(msg.id, msg.record)
+			m.open(msg.id, render.Record(msg.record, m.width-4))
 		}
 		return m, nil
 	case draftMsg:
@@ -176,7 +176,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.flash = msg.flash
 		m.discard(msg.saved)
-		if m.reading == msg.saved {
+		if m.reading == msg.saved || m.tab != tabIDs {
 			m.reading = ""
 		}
 		return m, m.load(m.tab)
@@ -220,8 +220,12 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if k == "ctrl+c" || k == "q" {
-		return m, tea.Quit
+	switch {
+	case k == "ctrl+c" || (k == "q" && len(m.drafts) == 0):
+		return m, m.quit()
+	case k == "q":
+		m.ask("Quit and discard your unsent drafts?", m.quit())
+		return m, nil
 	}
 	if m.reading != "" {
 		switch {
@@ -231,6 +235,12 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case k == "e" && m.tab == tabIDs:
 			m.flash, m.err, m.loading = "", nil, true
 			return m, m.edit(m.reading)
+		case k == "a":
+			m.approve()
+			return m, nil
+		case k == "d":
+			m.deny()
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.reader, cmd = m.reader.Update(msg)
@@ -254,7 +264,8 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return m, m.load(m.tab)
 	case "enter":
-		return m, m.enter()
+		cmd := m.enter()
+		return m, cmd
 	case "e":
 		if id, ok := pick(m.ids, m.table.Cursor(), m.tab == tabIDs); ok {
 			m.loading = true
@@ -274,11 +285,7 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		m.approve()
 	case "d":
-		if p, ok := pick(m.proposals, m.table.Cursor(), m.tab == tabProposals); ok {
-			m.ask("Deny proposal "+p.ID+"?", func() tea.Msg {
-				return doneMsg{flash: "Denied proposal " + p.ID, err: m.client.DenyProposal(m.ctx, p.ID)}
-			})
-		}
+		m.deny()
 	default:
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
@@ -287,11 +294,18 @@ func (m Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// approve publishes or rejects the record under the cursor at the revision shown, or approves the
+// proposal under the cursor.
 func (m *Model) approve() {
 	if item, ok := pick(m.review, m.table.Cursor(), m.tab == tabReview); ok {
-		m.ask("Publish "+item.CVEID+" with your key? It will be public.", func() tea.Msg {
-			_, err := m.client.Approve(m.ctx, item.CVEID)
-			return doneMsg{flash: "Published " + item.CVEID, err: err}
+		verb, done := "Publish", "Published "
+		if item.Action == "reject" {
+			verb, done = "Reject", "Rejected "
+		}
+		question := fmt.Sprintf("%s %s, revision %d, with your key? It will be public.", verb, item.CVEID, item.Revision)
+		m.ask(question, func() tea.Msg {
+			_, err := m.client.Approve(m.ctx, item.CVEID, item.Revision)
+			return doneMsg{flash: done + item.CVEID, err: err}
 		})
 	}
 	if p, ok := pick(m.proposals, m.table.Cursor(), m.tab == tabProposals); ok {
@@ -302,15 +316,29 @@ func (m *Model) approve() {
 	}
 }
 
-func (m Model) enter() tea.Cmd {
+func (m *Model) deny() {
+	if p, ok := pick(m.proposals, m.table.Cursor(), m.tab == tabProposals); ok {
+		m.ask("Deny proposal "+p.ID+"?", func() tea.Msg {
+			return doneMsg{flash: "Denied proposal " + p.ID, err: m.client.DenyProposal(m.ctx, p.ID)}
+		})
+	}
+}
+
+// enter opens what is under the cursor: a CVE ID's record, a record in review with what changed,
+// or the request a proposal sends.
+func (m *Model) enter() tea.Cmd {
 	if id, ok := pick(m.ids, m.table.Cursor(), m.tab == tabIDs); ok {
+		m.loading = true
 		return func() tea.Msg {
 			record, err := m.client.Record(m.ctx, id.ID)
 			return recordMsg{id.ID, record, err}
 		}
 	}
 	if item, ok := pick(m.review, m.table.Cursor(), m.tab == tabReview); ok {
-		return func() tea.Msg { return recordMsg{item.CVEID, item.Record, nil} }
+		m.open(item.CVEID, render.Review(item, m.width-4))
+	}
+	if p, ok := pick(m.proposals, m.table.Cursor(), m.tab == tabProposals); ok {
+		m.open(p.ID, render.Proposal(p))
 	}
 	return nil
 }
@@ -336,13 +364,15 @@ func (m *Model) load(t tab) tea.Cmd {
 		var err error
 		switch t {
 		case tabIDs:
-			data, err = client.ListIDs(ctx, "")
+			data, err = client.ListIDs(ctx, cveservices.IDFilter{})
 		case tabReview:
 			data, err = client.Review(ctx)
 		case tabProposals:
 			data, err = client.Proposals(ctx)
 		case tabAudit:
-			data, err = client.Audit(ctx, cveservices.AuditFilter{})
+			var page *cveservices.AuditPage
+			page, err = client.Audit(ctx, cveservices.AuditFilter{})
+			data = page.Entries
 		}
 		return loadedMsg{t, data, err}
 	}
@@ -354,11 +384,12 @@ func (m *Model) show(data any) {
 	case []cveservices.CVEID:
 		m.ids = data
 		for _, id := range data {
-			state := render.State(id.State)
+			state := render.State(render.Clean(id.State))
 			if id.Cvedexd != nil {
-				state += render.Faint.Render(" " + id.Cvedexd.Label())
+				state += render.Faint.Render(" " + render.Clean(id.Cvedexd.Label()))
 			}
-			rows = append(rows, table.Row{id.ID, state, id.Reserved.Format("2006-01-02"), id.RequestedBy.User})
+			rows = append(rows, table.Row{render.Clean(id.ID), state, id.Reserved.Format("2006-01-02"),
+				render.Clean(id.RequestedBy.User)})
 		}
 	case []cveservices.ReviewItem:
 		m.review = data
@@ -369,31 +400,35 @@ func (m *Model) show(data any) {
 				} `json:"cnaContainer"`
 			}
 			_ = json.Unmarshal(item.Record, &r)
-			rows = append(rows, table.Row{item.CVEID, item.Submitter, day(item.UpdatedAt), r.CNA.Title})
+			rows = append(rows, table.Row{render.Clean(item.CVEID), render.Clean(item.Action),
+				render.Clean(item.Submitter), day(item.UpdatedAt), render.Clean(r.CNA.Title)})
 		}
 	case []cveservices.Proposal:
 		m.proposals = data
 		for _, p := range data {
-			rows = append(rows, table.Row{p.ID, p.Method + " " + p.Path, day(p.CreatedAt)})
+			rows = append(rows, table.Row{render.Clean(p.ID), render.Clean(p.Method + " " + p.Path), day(p.CreatedAt)})
 		}
 	case []cveservices.AuditEntry:
 		m.audit = data
 		for _, e := range data {
-			status := strconv.Itoa(e.Status)
-			if e.Status >= 400 {
+			status := "?"
+			if e.Status != nil {
+				status = strconv.Itoa(*e.Status)
+			}
+			if e.Status == nil || *e.Status >= 400 {
 				status = render.Bad.Render(status)
 			}
 			rows = append(rows, table.Row{strings.Replace(e.Time[:min(len(e.Time), 19)], "T", " ", 1),
-				deref(e.Actor), deref(e.ActorKind), e.Method + " " + e.Path, status})
+				render.Clean(e.Actor), render.Clean(e.ActorKind), render.Clean(e.Method + " " + e.Path), status})
 		}
 	}
 	m.table.SetRows(rows)
 	m.table.SetCursor(min(m.table.Cursor(), max(len(rows)-1, 0)))
 }
 
-func (m *Model) open(id string, record json.RawMessage) {
+func (m *Model) open(id, content string) {
 	m.reading = id
-	m.reader.SetContent(render.Record(record, m.width-4))
+	m.reader.SetContent(content)
 	m.reader.GotoTop()
 	m.layout()
 }
@@ -408,6 +443,7 @@ var columns = map[tab][]table.Column{
 	},
 	tabReview: {
 		{Title: "CVE ID", Width: 16},
+		{Title: "ACTION", Width: 8},
 		{Title: "SUBMITTER", Width: 20},
 		{Title: "SENT", Width: 12},
 		{Title: "TITLE"},
@@ -473,9 +509,9 @@ func (m Model) View() tea.View {
 	var apiErr *cveservices.Error
 	switch {
 	case m.question != "":
-		status[0] = render.Warn.Render(m.question) + render.Faint.Render(" y/n")
+		status[0] = render.Warn.Render(render.Clean(m.question)) + render.Faint.Render(" y/n")
 	case m.err != nil:
-		status[0] = render.Bad.Render(m.err.Error())
+		status[0] = render.Bad.Render(render.Clean(m.err.Error()))
 		if errors.As(m.err, &apiErr) {
 			details := render.ErrorDetails(apiErr.Details)
 			if len(details) > maxDetails {
@@ -488,9 +524,9 @@ func (m Model) View() tea.View {
 	case m.loading:
 		status[0] = m.spinner.View() + render.Faint.Render(" Loading")
 	case m.flash != "":
-		status[0] = render.Good.Render(m.flash)
+		status[0] = render.Good.Render(render.Clean(m.flash))
 	case m.reading == "" && m.tab == tabIDs && m.cursorID().Cvedexd.ChangesRequested():
-		status[0] = render.Warn.Render("Changes requested: ") + m.cursorID().Cvedexd.Note
+		status[0] = render.Warn.Render("Changes requested: ") + render.Clean(m.cursorID().Cvedexd.Note)
 	case m.reading == "" && len(m.table.Rows()) == 0:
 		status[0] = render.Faint.Render("Nothing here yet.")
 	}
@@ -503,16 +539,17 @@ func (m Model) View() tea.View {
 		reader := m.reader
 		reader.SetHeight(height)
 		body = reader.View()
-		hints = "↑↓ scroll · esc back · q quit"
-		if m.tab == tabIDs {
-			hints = "↑↓ scroll · e edit · esc back · q quit"
-		}
+		hints = map[tab]string{
+			tabIDs:       "↑↓ scroll · e edit · esc back · q quit",
+			tabReview:    "↑↓ scroll · a approve · esc back · q quit",
+			tabProposals: "↑↓ scroll · a approve · d deny · esc back · q quit",
+		}[m.tab]
 	case m.tab == tabIDs:
 		hints = "↑↓ move · enter open · e edit · n new ID · r refresh · q quit"
 	case m.tab == tabReview:
 		hints = "↑↓ move · enter read · a approve · r refresh · q quit"
 	case m.tab == tabProposals:
-		hints = "↑↓ move · a approve · d deny · r refresh · q quit"
+		hints = "↑↓ move · enter read · a approve · d deny · r refresh · q quit"
 	}
 	if body == "" {
 		table := m.table
@@ -546,11 +583,4 @@ func pick[T any](items []T, cursor int, shown bool) (T, bool) {
 func day(timestamp string) string {
 	d, _, _ := strings.Cut(timestamp, "T")
 	return d
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

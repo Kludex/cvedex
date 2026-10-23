@@ -1,19 +1,18 @@
 # cvedex
 
-`cvedex` is a client for [CVE Services](https://www.cve.org/AllResources/CveServices), the API CNAs use to reserve CVE IDs and publish CVE records. It is one static binary with a CLI, a terminal UI, an MCP server for AI agents, and a Go library.
+**Reserve CVE IDs and publish CVE records from your terminal, your scripts, or your AI agent.**
 
-`cvedexd` is a small server you put between your people and CVE Services, so maintainers can reserve IDs and send records for review without being able to publish.
+---
 
-```console
-$ cvedex reserve
-Reserved 1 CVE ID
-  CVE-2026-1101
-Publish with cvedex publish CVE-2026-1101 record.json
+`cvedex` is a client for [CVE Services](https://www.cve.org/AllResources/CveServices), the API every CNA uses to reserve CVE IDs and publish CVE records.
 
-$ cvedex publish CVE-2026-1101 record.json
-Publish CVE-2026-1101 on https://cveawg.mitre.org? It will be public. Yes
-Published CVE-2026-1101
-```
+The key features are:
+
+- **One binary**: a CLI, a terminal UI, an MCP server and a Go library. No runtime to install.
+- **Safe by default**: it asks before anything public happens, and your API key lives in your system keychain.
+- **Made for scripts**: every command has `--json`, and `--yes` skips the questions.
+- **Made for agents**: `cvedex mcp` gives Claude, Codex or any MCP client the same tools you have.
+- **Shareable**: with `cvedexd`, your maintainers reserve IDs and propose records, and only your CNA's users publish.
 
 ## Install
 
@@ -21,36 +20,78 @@ Published CVE-2026-1101
 curl -fsSL https://raw.githubusercontent.com/Kludex/cvedex/main/install.sh | sh
 ```
 
-The script picks the release for your OS and architecture, checks its checksum, and, if `gh` is logged in, its build provenance. On Windows, download the `.zip` from the [releases page](https://github.com/Kludex/cvedex/releases).
+The script checks the checksum of what it downloads, and if you have `gh`, that GitHub built it.
 
-## Quick start
+On Windows, download the `.zip` from the [releases page](https://github.com/Kludex/cvedex/releases).
 
-Log in to MITRE's test instance, where nothing you publish is real. The API key goes in your system keychain:
+## Example
+
+Log in to MITRE's test instance, where nothing you publish is real:
 
 ```sh
 cvedex login --test
 ```
 
-Then reserve an ID, or open the terminal UI:
+Reserve an ID:
 
-```sh
-cvedex reserve
-cvedex tui
+```console
+$ cvedex reserve
+Reserved 1 CVE ID
+  CVE-2026-1101
+Publish with cvedex publish CVE-2026-1101 record.json
 ```
 
-## Why cvedexd
+Write `record.json`:
 
-CVE Services has no "reserve only" permission. Anyone who can reserve an ID can also publish. `cvedexd` runs on Cloudflare Workers with D1, speaks the same API, and holds publishing until one of your CNA's users approves it. `cvedex` works against it unchanged.
+```json
+{
+  "title": "Path traversal in widget's file server",
+  "descriptions": [{"lang": "en", "value": "widget before 1.4.2 serves files outside its root."}],
+  "affected": [
+    {
+      "vendor": "acme",
+      "product": "widget",
+      "versions": [{"version": "0", "lessThan": "1.4.2", "status": "affected", "versionType": "semver"}]
+    }
+  ],
+  "references": [{"url": "https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx"}]
+}
+```
 
-## Documentation
+And publish it:
+
+```console
+$ cvedex publish CVE-2026-1101 record.json
+Published CVE-2026-1101
+
+CVE-2026-1101  PUBLISHED
+Path traversal in widget's file server
+...
+```
+
+That's it. On production, `cvedex` asks before publishing, since the record becomes public. Prefer to click around? Run `cvedex tui`.
+
+## cvedexd
+
+CVE Services has no "reserve only" permission. Anyone who can reserve an ID can also publish.
+
+`cvedexd` fixes that. It's a small server you deploy to Cloudflare Workers, in front of CVE Services:
+
+- **Maintainers** get their own tokens. They reserve IDs and send records for review.
+- **Your CNA's users** review each record, with a diff, and approve or ask for changes.
+- **CVE Services** only sees requests your CNA approved.
+
+It speaks the same API, so `cvedex` works with it as is.
+
+## Learn more
 
 - [Log in](docs/login.md)
 - [Write and publish records](docs/records.md)
-- [Terminal UI](docs/tui.md)
-- [AI agents over MCP](docs/agents.md)
-- [Go library](docs/library.md)
+- [The terminal UI](docs/tui.md)
+- [AI agents](docs/agents.md)
+- [The Go library](docs/library.md)
 - [cvedexd](docs/cvedexd/index.md)
 
 ## License
 
-[MIT](LICENSE)
+This project is licensed under the terms of the [MIT license](LICENSE).

@@ -100,10 +100,7 @@ func TestFromAdvisoryAffected(t *testing.T) {
 
 func TestFromAdvisoryTitle(t *testing.T) {
 	tests := []struct{ summary, want string }{
-		{"Denial of service via a boundary", "python-multipart has denial of service via a boundary"},
-		{"DoS via a boundary", "python-multipart has DoS via a boundary"},
-		{"XSS in the form", "python-multipart has XSS in the form"},
-		{"Élévation de privilèges", "python-multipart has élévation de privilèges"},
+		{"Denial of service via a boundary", "python-multipart: Denial of service via a boundary"},
 		{"Python-Multipart vulnerable to DoS", "Python-Multipart vulnerable to DoS"},
 		{"", ""},
 	}

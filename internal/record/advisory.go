@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
 // AdvisoryHint is the start of a GitHub repository advisory URL, for help and error messages.
@@ -218,18 +216,13 @@ func (a advisory) container(owner, repo string) container {
 	return c
 }
 
-// title names the project first, as GitHub's CNA does: "widget has path traversal in its file
-// server". A summary that already starts with the name, or is empty, is kept.
+// title names the project first, "widget: Path traversal in the file server", since lists of
+// CVEs show only the title. A summary that already starts with the name, or is empty, is kept.
 func title(repo, summary string) string {
 	if summary == "" || strings.HasPrefix(strings.ToLower(summary), strings.ToLower(repo)) {
 		return summary
 	}
-	first, _, _ := strings.Cut(summary, " ")
-	r, size := utf8.DecodeRuneInString(first)
-	if rest := first[size:]; rest == strings.ToLower(rest) {
-		summary = string(unicode.ToLower(r)) + summary[size:]
-	}
-	return repo + " has " + summary
+	return repo + ": " + summary
 }
 
 var bound = regexp.MustCompile(`^(>=|<=|<|=)\s*(\S+)$`)

@@ -1,0 +1,8 @@
+# The docs site. cvedexd has its own Worker in server/wrangler.toml.
+name = "cvedex-docs"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[assets]
+directory = "./site"
+not_found_handling = "404-page"

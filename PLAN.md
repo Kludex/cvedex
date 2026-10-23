@@ -10,6 +10,7 @@ go.mod  install.sh  LICENSE  PLAN.md
 cmd/ cveservices/ internal/   cvedex (Go)
 testdata/recorded/   cassettes shared by both test suites
 docs/, zensical.toml user docs, built with Zensical
+wrangler.toml        the cvedex-docs Worker that serves them
 server/              cvedexd (TypeScript): wrangler.toml, package.json, src/, migrations/
 .github/workflows/
   ci.yml             golangci-lint + go test, server vitest, on every PR
@@ -189,7 +190,7 @@ Later, if people ask: a Homebrew tap and a `.deb`. Not before.
 
 ## Docs
 
-User docs live in `docs/`, built with [Zensical](https://zensical.org). Preview them with `uvx zensical serve`. They cover the client by task (log in, publish, org, TUI, agents, scripting, library) and `cvedexd` (why, deploy, submitters, review, API), with examples taken from real runs against the test instance.
+User docs live in `docs/`, built with [Zensical](https://zensical.org). Preview them with `uvx zensical serve`. Like Starlette's, they are served by a static-assets Worker, `cvedex-docs` in the root `wrangler.toml`: `release.yml` deploys them on each `v*` tag, so they match the released binary, and same-repo PRs get a preview URL from `wrangler versions upload`. They cover the client by task (log in, publish, org, TUI, agents, scripting, library) and `cvedexd` (why, deploy, submitters, review, API), with examples taken from real runs against the test instance.
 
 ## Not in v1
 

@@ -11,6 +11,7 @@ nav = [
     "records.md",
     "org.md",
     "tui.md",
+    "macos.md",
     "agents.md",
     "scripting.md",
     "library.md",

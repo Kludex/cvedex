@@ -51,6 +51,7 @@ internal/
   record/             the CVE JSON 5 schema check, and records built from GitHub advisories
   config/             ~/.config/cvedex/config.json, the key in the OS keychain, and env overrides
   cassette/           test server replaying testdata/recorded/
+macos/                the SwiftUI app, see "macOS app" below
 ```
 
 Records pass through as `json.RawMessage`, and the client only reads the few fields it renders. Before `publish`, `update` or a TUI save sends one, `internal/record` checks it against the bundled CNA container schema from `CVEProject/cve-schema` v5.2.0 (CC0), so a broken record fails before the network, with every problem listed. It adds a placeholder `providerMetadata` first, since CVE Services fills that in. The newest schema keeps the check no stricter than MITRE's.
@@ -107,6 +108,14 @@ Tools map 1:1 to CLI commands: `list_cves`, `show_cve`, `reserve_ids`, `publish_
 Tabs: CVE IDs (open a record, edit, reserve), and against `cvedexd` review (read with the diff, approve the revision read), proposals (read, approve, deny) and audit. Every write asks y/n first.
 
 `e` opens the CNA container in `$VISUAL` or `$EDITOR`, without the `providerMetadata` CVE Services fills in, or a template for a reserved ID. On save it asks to publish or update. A draft the API rejects is kept and reopens on the next `e`, with the validation errors shown under it. Quitting with unsent drafts asks, then deletes them.
+
+### macOS app
+
+A SwiftUI app in `macos/`, a Swift package for macOS 15 and later. It runs the `cvedex` bundled next to its executable with `--json` for every read and write, so the schema check, the advisory import, cvedexd support and the keychain entry are the client's, not a port. `--json` prints every failure as `{"error", "message", "details"}` on stderr for the app to parse, and `cvedex record check -` runs the check as you type. Writes pass `--yes` after the app's own confirmation.
+
+`CvedexKit` holds the logic (the process runner, the models, an `@Observable @MainActor` `Store`) and is tested at 100% with Swift Testing against a fake `cvedex` script. `CvedexMac` is the views: a sidebar of IDs, the record, a JSON editor with no smart quotes, and sheets for login and reject. `macos/build.sh` assembles `cvedex.app` with a universal `cvedex`, signed ad hoc.
+
+Not yet: notarization and a release asset, cvedexd's review, proposals and audit tabs, and a form editor.
 
 ## cvedexd (server)
 
@@ -201,7 +210,7 @@ Later, if people ask: a Homebrew tap and a `.deb`. Not before.
 - `cvedex` tests drive the CLI and TUI model through their public entry points against `internal/cassette`, an `httptest` server that replays the recorded exchanges in order and fails on any other request. `cvedexd` endpoints have no recordings yet, so those tests use inline exchanges in the server's response shapes.
 - `cvedexd` tests run under `@cloudflare/vitest-plugin` (the renamed `vitest-pool-workers`) against a real D1 binding, with upstream calls answered from fixtures by a stubbed `fetch`. 100% coverage is enforced.
 - Cassettes live in `testdata/recorded/`, shared by both test suites, and come from `scripts/record-fixtures.mjs`. Each holds the request and the response's status, rate-limit and content headers, and raw body. Without credentials it records the public and error responses; with a test-instance CNA account it records the authenticated reads, with `--writes` also a reservation and a publish, and with `--lifecycle` the ID state changes, both rejects and a user update. `--only=a,b` rewrites just those cassettes. Tests only replay; CI never calls the test instance.
-- CI runs `go test -race` on Linux, macOS and Windows, and enforces 100% coverage of `cveservices/` and `internal/` on Linux. The prompts and `cvedex tui` are tested in a pseudo-terminal, which Windows skips.
+- CI runs `go test -race` on Linux, macOS and Windows, and enforces 100% coverage of `cveservices/` and `internal/` on Linux. It also lints the macOS app with `swift format`, enforces 100% line coverage of `CvedexKit`, and builds the bundle. The prompts and `cvedex tui` are tested in a pseudo-terminal, which Windows skips.
 
 ## Docs
 

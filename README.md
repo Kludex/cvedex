@@ -75,7 +75,7 @@ Path traversal in widget's file server
 ...
 ```
 
-That's it. On production, `cvedex` asks before publishing, since the record becomes public. Prefer to click around? Run `cvedex tui`.
+That's it. On production, `cvedex` asks before publishing, since the record becomes public. Prefer to click around? Run `cvedex tui`, or build the [macOS app](docs/macos.md) with `macos/build.sh`.
 
 ## cvedexd
 
@@ -94,6 +94,7 @@ It speaks the same API, so `cvedex` works with it as is.
 - [Log in](docs/login.md)
 - [Write and publish records](docs/records.md)
 - [The terminal UI](docs/tui.md)
+- [The macOS app](docs/macos.md)
 - [AI agents](docs/agents.md)
 - [The Go library](docs/library.md)
 - [cvedexd](docs/cvedexd/index.md)

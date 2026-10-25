@@ -151,12 +151,9 @@ func (a *app) writeCommand(name, short string, send writeFunc) *cobra.Command {
 			"  cat record.json | cvedex " + name + " CVE-2026-1234 -",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cna, err := a.readContainer(args[1])
+			cna, err := a.readChecked(args[1])
 			if err != nil {
 				return err
-			}
-			if err := record.Check(cna); err != nil {
-				return fmt.Errorf("%s is %w", cmp.Or(strings.TrimPrefix(args[1], "-"), "the record on stdin"), err)
 			}
 			return a.write(cmd, name, cveID(args[0]), cna, yes, send)
 		},
@@ -315,6 +312,18 @@ func (a *app) readContainer(path string) (json.RawMessage, error) {
 		return doc.Containers.CNA, nil
 	}
 	return data, nil
+}
+
+// readChecked reads a CNA container like readContainer, and checks it against the schema.
+func (a *app) readChecked(path string) (json.RawMessage, error) {
+	cna, err := a.readContainer(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := record.Check(cna); err != nil {
+		return nil, fmt.Errorf("%s is %w", cmp.Or(strings.TrimPrefix(path, "-"), "the record on stdin"), err)
+	}
+	return cna, nil
 }
 
 // readFile reads path, or stdin for -.

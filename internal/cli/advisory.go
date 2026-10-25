@@ -18,6 +18,22 @@ func (a *app) recordCommand() *cobra.Command {
 		Annotations: noAuth,
 	}
 	cmd.AddCommand(&cobra.Command{
+		Use:   "check <record.json>",
+		Short: "Check a record against the CVE JSON 5 schema",
+		Long: "Checks a record against the CVE JSON 5 schema, as publish and update do before sending, and lists\n" +
+			"every problem. The file holds the CNA container, bare, wrapped or in a full record. Pass - to read it\n" +
+			"from stdin.",
+		Example: "  cvedex record check record.json",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := a.readChecked(args[0]); err != nil {
+				return err
+			}
+			return a.output(map[string]bool{"valid": true}, func() string {
+				return render.Good.Render("The record is a valid CNA container")
+			})
+		},
+	}, &cobra.Command{
 		Use:   "from-advisory <url>",
 		Short: "Write a record from a GitHub repository advisory",
 		Long: "Fetches a GitHub repository advisory and prints the CNA container of a record built from it:\n" +

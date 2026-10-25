@@ -1,6 +1,6 @@
 # Scripting and CI
 
-Every command takes `--json`. It prints the API's response, and on error, the API's error body on stderr.
+Every command takes `--json`. It prints the API's response, and on error, a JSON body on stderr.
 
 ```console
 $ cvedex list --json | jq -r '.[] | select(.state == "RESERVED") | .cve_id'
@@ -17,7 +17,24 @@ $ echo $?
 1
 ```
 
+An error from CVE Services is its body as is. An error from `cvedex` itself has the same shape:
+
+| `error` | When | `details` |
+| --- | --- | --- |
+| `INVALID_RECORD` | The record fails the [schema check](records.md#checked-before-sending) | `problems`, one line each |
+| `NOT_LOGGED_IN` | There are no credentials | |
+| `PENDING_APPROVAL` | An agent token's write waits for its submitter | `proposal_id` |
+| `CVEDEX_ERROR` | Anything else, such as a missing file | |
+
 Text output is colored on a terminal only, so piping it is safe too.
+
+## Check records in CI
+
+`cvedex record check` runs the schema check alone, with no credentials and no network:
+
+```sh
+for record in records/*.json; do cvedex record check "$record" || exit 1; done
+```
 
 ## Credentials from the environment
 

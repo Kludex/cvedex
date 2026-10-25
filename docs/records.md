@@ -98,6 +98,8 @@ Error: record.json is not a valid CNA container:
 
 Each line is the path of a wrong field and what is wrong with it. A `oneOf` lists what each allowed shape is missing: here, a range needs a `versionType`.
 
+Run the check alone with `cvedex record check record.json`. It needs no login.
+
 `cvedex` bundles schema v5.2.0, the newest, so it never rejects a record CVE Services would accept. CVE Services still validates on its side, and its errors are shown the same way.
 
 ## Publish

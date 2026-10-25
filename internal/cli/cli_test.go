@@ -205,6 +205,15 @@ func TestCommands(t *testing.T) {
 			stderr: []string{"Waiting for approval as proposal p1", "cvedex proposals show p1"},
 		},
 		{
+			name: "reserve through an agent token as JSON",
+			exchanges: []cassette.Exchange{{Method: "POST", Path: "/api/cve-id?amount=1&cve_year=2026&short_name=acme",
+				Status: 202, Response: `{"proposal_id":"p1"}`}},
+			args: []string{"reserve", "--year", "2026", "--json"},
+			code: 1,
+			stderr: []string{`{"error":"PENDING_APPROVAL","message":"waiting for approval as proposal p1",` +
+				`"details":{"proposal_id":"p1"}}`},
+		},
+		{
 			name: "reserve several",
 			exchanges: []cassette.Exchange{
 				{Method: "POST", Path: "/api/cve-id?amount=2&batch_type=sequential&cve_year=2026&short_name=acme",
@@ -277,6 +286,20 @@ func TestCommands(t *testing.T) {
 			code: 1, stderr: []string{"https://acme.org is not a GitHub repository advisory"}},
 		{name: "publish a file that is not JSON", args: []string{"publish", "CVE-2026-1100", broken}, code: 1,
 			stderr: []string{"broken.json is not a JSON object"}},
+		{name: "publish a file that is not JSON, as JSON", args: []string{"publish", "CVE-2026-1100", broken, "--json"},
+			code: 1, stderr: []string{`{"error":"CVEDEX_ERROR","message":"` + broken + ` is not a JSON object: `}},
+		{name: "record check", args: []string{"record", "check", bare},
+			stdout: []string{"The record is a valid CNA container"}},
+		{name: "record check as JSON", args: []string{"record", "check", "--json", "-"}, stdin: string(sent.CNA),
+			stdout: []string{`"valid": true`}},
+		{
+			name:  "record check an invalid record as JSON",
+			args:  []string{"record", "check", "--json", "-"},
+			stdin: "{}",
+			code:  1,
+			stderr: []string{`{"error":"INVALID_RECORD","message":"the record on stdin is not a valid CNA container",` +
+				`"details":{"problems":["- missing properties 'descriptions', 'affected', 'references'"]}}`},
+		},
 		{
 			name:   "publish a missing file",
 			args:   []string{"publish", "CVE-2026-1100", filepath.Join(dir, "missing.json")},
@@ -1078,6 +1101,14 @@ func TestNotLoggedIn(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "Not logged in. Run cvedex login") {
 		t.Errorf("list: %s", stderr.String())
+	}
+	stderr.Reset()
+	code := cli.Main(context.Background(), []string{"list", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("list --json: exit code %d", code)
+	}
+	if got := stderr.String(); got != `{"error":"NOT_LOGGED_IN","message":"not logged in"}`+"\n" {
+		t.Errorf("list --json: %s", got)
 	}
 }
 

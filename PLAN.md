@@ -76,10 +76,11 @@ cvedex reject  CVE-2026-0001 --reason "..."   POST /api/cve/{id}/reject, or PUT 
 cvedex reject  CVE-2026-0001 --id-only | unreject CVE-2026-0001    PUT /api/cve-id/{id}?state=
 cvedex adp     CVE-2026-0001 adp.json         PUT  /api/cve/{id}/adp
 cvedex record from-advisory <GHSA URL>        a CNA container from a GitHub repository advisory, on stdout
+cvedex record check record.json               the schema check alone, without credentials
 cvedex org | org quota | org users | org add-user <name> | org update-user <name> | org reset-key <name>
 ```
 
-Every command takes `--json`, which prints the API response, and errors as the API's body on stderr. Text output is colored on a terminal only, and control characters from the server are printed as escapes. Server URLs must be https, except to loopback. A `429` is retried after `Retry-After`, three times at most. IDs work without the `CVE-` prefix. `record.json` is a CNA container, bare, wrapped as `{"cnaContainer": ...}`, or a full record as `show --json` prints it; `-` reads stdin. Writes to MITRE production and `reset-key` ask for confirmation, or need `--yes` without a terminal. Non-zero exit on error.
+Every command takes `--json`, which prints the API response, and errors as JSON on stderr: the API's body, or `{"error", "message", "details"}` in the same shape for the client's own (`INVALID_RECORD`, `NOT_LOGGED_IN`, `PENDING_APPROVAL`, `CVEDEX_ERROR`). Text output is colored on a terminal only, and control characters from the server are printed as escapes. Server URLs must be https, except to loopback. A `429` is retried after `Retry-After`, three times at most. IDs work without the `CVE-` prefix. `record.json` is a CNA container, bare, wrapped as `{"cnaContainer": ...}`, or a full record as `show --json` prints it; `-` reads stdin. Writes to MITRE production and `reset-key` ask for confirmation, or need `--yes` without a terminal. Non-zero exit on error.
 
 Against `cvedexd` only, checked with `GET /api/health-check`:
 

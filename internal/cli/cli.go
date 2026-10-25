@@ -190,6 +190,22 @@ func (a *app) printError(err error) {
 	switch {
 	case errors.As(err, &apiErr) && a.json:
 		_, _ = fmt.Fprintln(a.stderr, strings.TrimSpace(string(apiErr.Body)))
+	case a.json:
+		body := struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+			Details any    `json:"details,omitempty"`
+		}{"CVEDEX_ERROR", err.Error(), nil}
+		switch {
+		case errors.As(err, &pending):
+			body.Error, body.Details = "PENDING_APPROVAL", map[string]string{"proposal_id": pending.ProposalID}
+		case errors.As(err, &invalid):
+			body.Error, body.Details = "INVALID_RECORD", map[string][]string{"problems": invalid.Problems}
+		case errors.Is(err, errNotLoggedIn):
+			body.Error = "NOT_LOGGED_IN"
+		}
+		data, _ := json.Marshal(body) // strings and string maps always marshal
+		_, _ = fmt.Fprintln(a.stderr, string(data))
 	case errors.As(err, &apiErr):
 		a.printAPIError(apiErr)
 	case errors.As(err, &pending):

@@ -2,87 +2,192 @@ import AppKit
 import CvedexKit
 import SwiftUI
 
-/// Edits a CNA container as JSON, checked against the CVE schema as you type.
+/// Builds a record with a form, or edits it as JSON. Both edit the same container, checked as you go.
 struct EditorView: View {
     let id: String
     let publish: Bool
+    let close: () -> Void
     @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
+    @State private var mode = Mode.form
     @State private var text = ""
-    @State private var problems: [String]?
+    @State private var loadedText: String?
+    @State private var container = Container.blank
+    @State private var parseError: String?
+    @State private var problems: [Problem]?
+    @State private var showingProblems = false
+    @State private var revealed = false
+    @State private var importing = false
     @State private var advisory = ""
     @State private var busy = false
     @State private var confirming = false
     @State private var failure: String?
 
+    enum Mode: String, CaseIterable {
+        case form = "Form"
+        case json = "JSON"
+    }
+
     private var verb: String { publish ? "Publish" : "Update" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                TextField("GitHub advisory URL", text: $advisory, prompt: Text(advisoryHint))
-                    .onSubmit(importAdvisory)
-                Button("Import", action: importAdvisory).disabled(advisory.isEmpty || busy)
+        VStack(spacing: 0) {
+            if loadedText == nil {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if mode == .json {
+                JSONEditor(text: $text)
+            } else if let parseError {
+                ContentUnavailableView {
+                    Label("The JSON Has an Error", systemImage: "curlybraces")
+                } description: {
+                    Text(parseError)
+                } actions: {
+                    Button("Show JSON") { mode = .json }
+                }
+            } else {
+                BuilderForm(
+                    container: $container,
+                    problems: (problems ?? []).filter { revealed || $0.message != Problem.required })
             }
-            .padding()
-            JSONEditor(text: $text)
             Divider()
-            VStack(alignment: .leading, spacing: 4) {
-                switch problems {
-                case nil:
-                    Label("Checking…", systemImage: "hourglass").foregroundStyle(.secondary)
-                case let problems? where problems.isEmpty:
-                    Label("Valid CNA container", systemImage: "checkmark.circle").foregroundStyle(.green)
-                case let problems?:
-                    Label("Not a valid CNA container", systemImage: "xmark.circle").foregroundStyle(.red)
-                    ScrollView {
-                        Text(problems.joined(separator: "\n")).font(.callout.monospaced())
-                            .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                    }
-                    .frame(maxHeight: 120)
-                }
-                if let failure {
-                    Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                }
-            }
-            .padding()
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("\(verb)…") { confirming = true }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(problems != [] || busy)
-            }
-            .padding([.horizontal, .bottom])
+            statusBar
         }
-        .frame(minWidth: 720, minHeight: 560)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Editor", selection: $mode) {
+                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button("Import Advisory", systemImage: "square.and.arrow.down") { importing = true }
+                    .help("Fill the record from a GitHub security advisory")
+                    .popover(isPresented: $importing, arrowEdge: .bottom) { importForm }
+                Button("Close Editor", systemImage: "xmark") { close() }
+                    .help("Close the editor. Your draft is kept.")
+                Button("\(verb)…") { confirming = true }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(problems != [] || parseError != nil || busy)
+            }
+        }
         .task {
             do {
-                text = try await store.draft(id)
+                let draft = try await store.draft(id)
+                // In the form's own layout, so switching to the form does not count as an edit.
+                let normalized = (try? Container(text: draft))?.text ?? draft
+                text = normalized
+                loadedText = normalized
             } catch {
                 failure = error.localizedDescription
+                loadedText = ""
             }
+        }
+        .onChange(of: text) {
+            do {
+                let parsed = try Container(text: text)
+                if parsed != container { container = parsed }
+                parseError = nil
+            } catch {
+                parseError = (error as? DecodingError).map(describe) ?? error.localizedDescription
+            }
+            if let loadedText, text != loadedText { store.saveDraft(id, container: text) }
+        }
+        .onChange(of: container) {
+            if mode == .form, container.text != text { text = container.text }
         }
         .task(id: text) {
             problems = nil
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            problems = await store.check(text)
+            problems = Problem.parse(await store.check(text))
         }
-        .confirmationDialog("\(verb) \(id)? It will be public.", isPresented: $confirming) {
+        .confirmationDialog(
+            store.status?.isProduction == true ? "\(verb) \(id) on MITRE production?" : "\(verb) \(id)?",
+            isPresented: $confirming
+        ) {
             Button(verb) { Task { await send() } }
+        } message: {
+            Text("The record becomes public.")
         }
     }
 
-    private let advisoryHint = "https://github.com/OWNER/REPO/security/advisories/GHSA-..."
+    private var statusBar: some View {
+        HStack(spacing: 8) {
+            switch problems {
+            case nil:
+                ProgressView().controlSize(.small)
+                Text("Checking…").foregroundStyle(.secondary)
+            case let problems? where problems.isEmpty:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Ready to \(verb.lowercased())")
+            case let problems?:
+                Button {
+                    revealed = true
+                    showingProblems = true
+                } label: {
+                    Label(
+                        problems.count == 1 ? "1 problem" : "\(problems.count) problems",
+                        systemImage: "exclamationmark.triangle.fill")
+                }
+                .buttonStyle(.link)
+                .foregroundStyle(.orange)
+                .popover(isPresented: $showingProblems, arrowEdge: .top) { ProblemList(problems: problems) }
+            }
+            if let failure {
+                Text(failure).foregroundStyle(.red).lineLimit(1).help(failure)
+            }
+            Spacer()
+            if store.drafts.contains(id) {
+                Text("Draft saved").foregroundStyle(.secondary)
+                Button("Discard", role: .destructive) {
+                    store.discardDraft(id)
+                    close()
+                }
+                .buttonStyle(.link)
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private var importForm: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Import a GitHub Advisory").font(.headline)
+            Text(
+                "Fills in the record from a repository security advisory, replacing what is here. You can edit everything after."
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            TextField(
+                "Advisory URL", text: $advisory,
+                prompt: Text("https://github.com/acme/widget/security/advisories/GHSA-…")
+            )
+            .textFieldStyle(.roundedBorder)
+            .onSubmit(importAdvisory)
+            HStack {
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Import", action: importAdvisory)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(advisory.isEmpty || busy)
+            }
+        }
+        .padding()
+        .frame(width: 440)
+    }
 
     private func importAdvisory() {
+        guard !advisory.isEmpty else { return }
         busy = true
         Task {
             defer { busy = false }
             do {
                 text = try await store.fromAdvisory(advisory.trimmingCharacters(in: .whitespaces))
                 failure = nil
+                importing = false
             } catch {
                 failure = error.localizedDescription
             }
@@ -94,13 +199,46 @@ struct EditorView: View {
         defer { busy = false }
         do {
             _ = try await store.send(id, container: text, publish: publish)
-            dismiss()
+            close()
         } catch let error as CLIError {
             failure = error.message
-            if !error.problems.isEmpty { problems = error.problems }
+            if !error.problems.isEmpty { problems = Problem.parse(error.problems) }
         } catch {
             failure = error.localizedDescription
         }
+    }
+
+    private func describe(_ error: DecodingError) -> String {
+        switch error {
+        case .dataCorrupted(let context):
+            let reason = (context.underlyingError as NSError?)?.userInfo[NSDebugDescriptionErrorKey] as? String
+            return reason ?? context.debugDescription
+        default:
+            return error.localizedDescription
+        }
+    }
+}
+
+private struct ProblemList: View {
+    let problems: [Problem]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(problems, id: \.self) { problem in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(problem.message)
+                        Text(problem.path.isEmpty ? "the record" : problem.path)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        }
+        .frame(width: 420, height: min(CGFloat(problems.count) * 44 + 24, 360))
     }
 }
 
@@ -119,7 +257,7 @@ private struct JSONEditor: NSViewRepresentable {
         view.isAutomaticTextReplacementEnabled = false
         view.isAutomaticSpellingCorrectionEnabled = false
         view.isContinuousSpellCheckingEnabled = false
-        view.textContainerInset = NSSize(width: 8, height: 8)
+        view.textContainerInset = NSSize(width: 12, height: 12)
         view.delegate = context.coordinator
         return scroll
     }

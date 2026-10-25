@@ -18,22 +18,41 @@ open macos/build/cvedex.app
 
 | Where | What you do |
 | --- | --- |
-| Sidebar | Browse your CVE IDs, filtered by state |
+| Sidebar | Browse your CVE IDs by state, or search them |
 | <kbd>+</kbd> in the toolbar | Reserve an ID for this year |
-| A record | Read its title, description, affected versions, weaknesses and references |
-| **Write Record** or **Edit Record** | Edit the CNA container as JSON, publish or update it |
-| **Reject** | Reject the ID, with a reason |
-| Account menu | Log in, log out |
+| An ID | Read its record: description, affected versions, severity, weaknesses, references and credits |
+| **Write Record** or **Edit Record** | Build the record in a form, or edit it as JSON, then publish or update it |
+| **More** > **Reject** | Reject the ID, with a reason |
+| The foot of the sidebar | See who you are logged in as and where, switch account, log out |
 
 Every write asks first. The dialog names the ID and says it will be public.
 
-## The editor
+## The builder
 
-The editor holds the CNA container as JSON, the same file `cvedex publish` takes. Below it, the [schema check](records.md#checked-before-sending) runs as you type and lists every problem. **Publish** stays off until the record is valid.
+**Write Record** opens a form with a section for each part of the record:
 
-Paste a GitHub advisory URL at the top and press **Import** to start from the advisory, as [`cvedex record from-advisory`](records.md#from-a-github-advisory) does.
+| Section | What you fill in |
+| --- | --- |
+| Summary and Description | A title, and what an attacker can do. The description takes Markdown. |
+| Affected product | Vendor, product, repository, package registry, and the versions, such as *affected from 0 before 1.2.3* |
+| Weaknesses | CWE IDs, picked from MITRE's list by number or by name |
+| Severity | A CVSS 3.1 score. Pick each metric, and the app computes the vector and the score. |
+| References | Links, each tagged as an advisory, a patch, release notes and so on |
+| Credits | Who found, reported or fixed it |
 
-The editor never turns `"` into a curly quote or `--` into a dash, whatever your system's text settings. Either would break the JSON.
+The status bar runs the [schema check](records.md#checked-before-sending) as you type. Click its problem count to list the problems and mark each field that has one. **Publish** stays off until the record is valid.
+
+**JSON** in the toolbar shows the same record as the CNA container, the file `cvedex publish` takes. Edits in either view show up in the other. Fields the form has no control for stay as they are.
+
+!!! tip "Start from a GitHub advisory"
+    The import button in the toolbar fills the whole form from a repository security advisory, as [`cvedex record from-advisory`](records.md#from-a-github-advisory) does. Check it, add what GitHub does not know, and publish.
+
+### Drafts
+
+Every change is saved as a draft on your Mac, per ID. Close the editor, or quit the app, and the draft is there next time. The sidebar marks IDs with an unsent draft with a pencil. Publishing removes the draft, and so does **Discard**.
+
+!!! info "The JSON view is plain text"
+    It never turns `"` into a curly quote or `--` into a dash, whatever your system's text settings. Either would break the JSON.
 
 ## Login
 

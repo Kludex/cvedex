@@ -11,6 +11,7 @@ public struct Status: Decodable, Equatable, Sendable {
     public let submitter: String?
 
     public var loggedIn: Bool { user != nil || submitter != nil }
+    public var isProduction: Bool { url == "https://cveawg.mitre.org" }
 
     public struct User: Decodable, Equatable, Sendable {
         public let username: String
@@ -43,10 +44,34 @@ public struct Record: Decodable, Equatable, Sendable {
     public let datePublished: String?
     public let title: String?
     public let descriptions: [String]
-    public let affected: [String]
+    public let affected: [Affected]
     public let cwes: [String]
-    public let references: [String]
+    public let scores: [Score]
+    public let references: [Link]
+    public let credits: [String]
     public let rejectedReasons: [String]
+
+    public struct Affected: Equatable, Sendable {
+        public let name: String
+        /// Each version or range, such as `0 to before 1.2.3`, and its status.
+        public let versions: [(range: String, status: String)]
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.name == rhs.name && lhs.versions.elementsEqual(rhs.versions) { $0 == $1 }
+        }
+    }
+
+    public struct Score: Equatable, Sendable {
+        public let version: String
+        public let score: Double
+        public let severity: String
+        public let vector: String
+    }
+
+    public struct Link: Equatable, Sendable {
+        public let url: String
+        public let tags: [String]
+    }
 
     private enum Keys: String, CodingKey { case cveMetadata, containers, cnaContainer, cna }
 
@@ -72,13 +97,22 @@ public struct Record: Decodable, Equatable, Sendable {
             struct Description: Decodable { let description: String }
             let descriptions: [Description]
         }
-        struct Reference: Decodable { let url: String }
+        struct Reference: Decodable {
+            let url: String
+            let tags: [String]?
+        }
+        struct Credit: Decodable {
+            let value: String
+            let type: String?
+        }
 
         let title: String?
         let descriptions: [Text]?
         let affected: [Product]?
         let problemTypes: [ProblemType]?
+        let metrics: [JSONValue]?
         let references: [Reference]?
+        let credits: [Credit]?
         let rejectedReasons: [Text]?
     }
 
@@ -93,16 +127,26 @@ public struct Record: Decodable, Equatable, Sendable {
         title = cna.title
         descriptions = (cna.descriptions ?? []).map(\.value)
         affected = (cna.affected ?? []).map { product in
-            let name = [product.vendor, product.product].compactMap(\.self).joined(separator: " ")
-            let versions = (product.versions ?? []).map { v in
-                if let limit = v.lessThan { return "\(v.version) to before \(limit): \(v.status)" }
-                if let limit = v.lessThanOrEqual { return "\(v.version) to \(limit): \(v.status)" }
-                return "\(v.version): \(v.status)"
-            }
-            return ([name] + versions).joined(separator: "\n")
+            Affected(
+                name: [product.vendor, product.product].compactMap(\.self).joined(separator: " "),
+                versions: (product.versions ?? []).map { v in
+                    if let limit = v.lessThan { return ("\(v.version) to before \(limit)", v.status) }
+                    if let limit = v.lessThanOrEqual { return ("\(v.version) to \(limit)", v.status) }
+                    return (v.version, v.status)
+                })
         }
         cwes = (cna.problemTypes ?? []).flatMap(\.descriptions).map(\.description)
-        references = (cna.references ?? []).map(\.url)
+        scores = (cna.metrics ?? []).compactMap(\.object).flatMap(\.values).compactMap { metric in
+            guard let score = metric.object, let version = score["version"]?.string,
+                let base = score["baseScore"]?.number, let vector = score["vectorString"]?.string
+            else { return nil }
+            return Score(version: version, score: base, severity: score["baseSeverity"]?.string ?? "", vector: vector)
+        }
+        .sorted { $0.version > $1.version }
+        references = (cna.references ?? []).map { Link(url: $0.url, tags: $0.tags ?? []) }
+        credits = (cna.credits ?? []).map {
+            [$0.value, $0.type.map { "(\($0))" }].compactMap(\.self).joined(separator: " ")
+        }
         rejectedReasons = (cna.rejectedReasons ?? []).map(\.value)
     }
 }

@@ -174,7 +174,7 @@ var link = regexp.MustCompile("https?://[^\\s<>()\\[\\]\"'`]+")
 func (a advisory) container(owner, repo string) container {
 	c := container{
 		Title:        title(repo, a.Summary),
-		Descriptions: []text{{Lang: "en", Value: a.Description}},
+		Descriptions: []text{{Lang: "en", Value: strings.ReplaceAll(a.Description, "\r\n", "\n")}},
 		References:   []reference{{URL: a.HTMLURL, Tags: []string{"vendor-advisory"}}},
 		Source:       source{Advisory: a.GHSAID, Discovery: "UNKNOWN"},
 	}

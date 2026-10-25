@@ -113,7 +113,9 @@ Tabs: CVE IDs (open a record, edit, reserve), and against `cvedexd` review (read
 
 A SwiftUI app in `macos/`, a Swift package for macOS 15 and later. It runs the `cvedex` bundled next to its executable with `--json` for every read and write, so the schema check, the advisory import, cvedexd support and the keychain entry are the client's, not a port. `--json` prints every failure as `{"error", "message", "details"}` on stderr for the app to parse, and `cvedex record check -` runs the check as you type. Writes pass `--yes` after the app's own confirmation.
 
-`CvedexKit` holds the logic (the process runner, the models, an `@Observable @MainActor` `Store`) and is tested at 100% with Swift Testing against a fake `cvedex` script. `CvedexMac` is the views: a sidebar of IDs, the record, a JSON editor with no smart quotes, and sheets for login and reject. `macos/build.sh` assembles `cvedex.app` with a universal `cvedex`, signed ad hoc.
+`CvedexKit` holds the logic and is tested at 100% with Swift Testing against a fake `cvedex` script: the process runner, the models, an `@Observable @MainActor` `Store` that also keeps per-ID drafts in `UserDefaults`, and the builder's model. That model is a `Container` over a `JSONValue` tree, with typed accessors for the fields the form edits (products and version ranges, CWEs, CVSS 3.1, references, credits), so fields it has no control for survive a round trip. `CVSS31` computes the base score as the specification does, `CWE` searches MITRE's list (generated into `CWEList.swift` by `macos/update-cwe.py`), and `Problem` maps the schema check's lines to JSON pointers so the form marks the field at fault.
+
+`CvedexMac` is the views: a sidebar of IDs by state with search, the record as a document, and an editor with two views of one container, a grouped form and a plain-text JSON view with no smart quotes. Sheets cover login and reject. `macos/build.sh` assembles `cvedex.app` with a universal `cvedex`, signed ad hoc.
 
 Not yet: notarization and a release asset, cvedexd's review, proposals and audit tabs, and a form editor.
 

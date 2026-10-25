@@ -9,16 +9,22 @@ public final class Store {
     public private(set) var loading = false
     /// The last failure to load, shown over the list.
     public var error: CLIError?
+    /// The IDs with an unsent draft.
+    public private(set) var drafts: Set<String>
 
     private let cli: CLI
+    private let defaults: UserDefaults
     private let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return decoder
     }()
 
-    public init(cli: CLI) {
+    public init(cli: CLI, defaults: UserDefaults = .standard) {
         self.cli = cli
+        self.defaults = defaults
+        drafts = Set(
+            defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("draft.") }.map { String($0.dropFirst(6)) })
     }
 
     /// Checks who is logged in, then loads their CVE IDs.
@@ -62,24 +68,35 @@ public final class Store {
         }
     }
 
-    /// The CNA container of `id` to edit, without the `providerMetadata` CVE Services fills in,
-    /// or a template while it has no record.
+    /// The CNA container of `id` to edit: your unsent draft, else the record without the `providerMetadata`
+    /// CVE Services fills in, else a blank one while it has no record.
     public func draft(_ id: String) async throws -> String {
+        if let saved = defaults.string(forKey: "draft.\(id)") {
+            return saved
+        }
         let data: Data
         do {
             data = try await cli.run(["show", id])
         } catch let error as CLIError where error.code == "CVE_RECORD_DNE" {
-            return Self.template
+            return Container.blank.text
         }
-        let record = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let containers = record?["containers"] as? [String: Any]
-        guard var cna = record?["cnaContainer"] as? [String: Any] ?? containers?["cna"] as? [String: Any] else {
+        let record = try decoder.decode(JSONValue.self, from: data).object
+        guard var cna = (record?["cnaContainer"] ?? record?["containers"]?.object?["cna"])?.object else {
             throw CLIError(code: "CVEDEX_ERROR", message: "\(id) has no CNA container")
         }
         cna["providerMetadata"] = nil
-        let text = try JSONSerialization.data(
-            withJSONObject: cna, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        return String(decoding: text, as: UTF8.self) + "\n"
+        return Container(fields: cna).text
+    }
+
+    /// Keeps `container` as the draft of `id` until it is sent or discarded, across launches.
+    public func saveDraft(_ id: String, container: String) {
+        defaults.set(container, forKey: "draft.\(id)")
+        drafts.insert(id)
+    }
+
+    public func discardDraft(_ id: String) {
+        defaults.removeObject(forKey: "draft.\(id)")
+        drafts.remove(id)
     }
 
     /// What is wrong with a CNA container, one line each, or nothing when it is valid.
@@ -97,6 +114,7 @@ public final class Store {
     public func send(_ id: String, container: String, publish: Bool) async throws -> String {
         let written = try await cli.run(
             [publish ? "publish" : "update", id, "-", "--yes"], input: Data(container.utf8))
+        discardDraft(id)
         await refresh()
         if (try? decoder.decode(Written.self, from: written))?.state == "in_review" {
             return "Sent \(id) for review"
@@ -119,21 +137,4 @@ public final class Store {
     private static func cliError(_ error: any Error) -> CLIError {
         error as? CLIError ?? CLIError(code: "CVEDEX_ERROR", message: error.localizedDescription)
     }
-
-    static let template = """
-        {
-          "title": "",
-          "descriptions": [{"lang": "en", "value": ""}],
-          "affected": [
-            {
-              "vendor": "",
-              "product": "",
-              "versions": [{"version": "0", "lessThan": "", "status": "affected", "versionType": "semver"}]
-            }
-          ],
-          "problemTypes": [{"descriptions": [{"lang": "en", "type": "CWE", "cweId": "CWE-", "description": ""}]}],
-          "references": [{"url": ""}]
-        }
-
-        """
 }

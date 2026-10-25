@@ -157,9 +157,12 @@ func TestFromAdvisoryMetrics(t *testing.T) {
 func TestFromAdvisoryText(t *testing.T) {
 	fields := fromAdvisory(t, map[string]any{
 		"cwes": []any{},
-		"description": "See https://example.com/a. Also [this](https://example.com/b), https://example.com/a again and " +
+		"description": "See https://example.com/a.\r\nAlso [this](https://example.com/b), https://example.com/a again and " +
 			advisoryURL + ".",
 	})
+	if got := compact(t, fields["descriptions"]); !strings.Contains(got, `a.\nAlso`) {
+		t.Errorf("descriptions keep GitHub's CRLF line endings: %s", got)
+	}
 	if _, ok := fields["problemTypes"]; ok {
 		t.Errorf("problemTypes without CWEs: %s", fields["problemTypes"])
 	}

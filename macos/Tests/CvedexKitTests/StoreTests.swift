@@ -52,6 +52,11 @@ extension String {
     fileprivate var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
 }
 
+/// Defaults of their own, so drafts saved in one test stay out of the others and of yours.
+func fresh() -> UserDefaults {
+    UserDefaults(suiteName: "cvedex-tests-\(UUID().uuidString)")!
+}
+
 func ok(_ stdout: String) -> (stdout: String, stderr: String, code: Int32) { (stdout, "", 0) }
 func fail(_ stderr: String) -> (stdout: String, stderr: String, code: Int32) { ("", stderr, 1) }
 
@@ -68,16 +73,24 @@ let published = """
         {"version":"2.0","lessThanOrEqual":"2.1","status":"affected"},
         {"version":"3.0","status":"unaffected"}]},{"product":"gadget"}],
       "problemTypes":[{"descriptions":[{"lang":"en","description":"CWE-22: Path Traversal"}]}],
-      "references":[{"url":"https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx"}]}}}
+      "metrics":[{"format":"CVSS","scenarios":[{"lang":"en","value":"GENERAL"}],
+        "cvssV3_1":{"version":"3.1","baseScore":7.5,"baseSeverity":"HIGH",
+          "vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"}},
+        {"cvssV4_0":{"version":"4.0","baseScore":8.7,"vectorString":"CVSS:4.0/AV:N"}},
+        {"other":{"type":"ssvc"}}],
+      "credits":[{"lang":"en","value":"bob","type":"finder"},{"lang":"en","value":"carol"}],
+      "references":[{"url":"https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx",
+        "tags":["vendor-advisory"]},{"url":"https://github.com/acme/widget/pull/1"}]}}}
     """
 
 @MainActor
 @Suite struct StoreTests {
     @Test func refreshLoggedIn() async throws {
         let fake = try Fake([ok(alice), ok(reserved)])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         await store.refresh()
         #expect(store.status?.user?.username == "alice@acme.test")
+        #expect(store.status?.isProduction == false)
         #expect(store.ids.map(\.id) == ["CVE-2026-1100"])
         #expect(store.error == nil && !store.loading)
         #expect(fake.calls == ["status --json", "list --json"])
@@ -85,7 +98,7 @@ let published = """
 
     @Test func refreshLoggedOutOrEmpty() async throws {
         let fake = try Fake([ok(loggedOut), ok(#"{"url":"u","server":"cvedexd","submitter":"bob"}"#), ok("null")])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         await store.refresh()
         #expect(store.status?.loggedIn == false && store.ids.isEmpty)
         await store.refresh()
@@ -95,17 +108,17 @@ let published = """
 
     @Test func refreshFails() async throws {
         let fake = try Fake([fail(#"{"error":"UNAUTHORIZED","message":"Unauthorized"}"#)])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         await store.refresh()
         #expect(store.error == CLIError(code: "UNAUTHORIZED", message: "Unauthorized"))
-        let missing = Store(cli: CLI(executable: fake.dir.appending(path: "missing")))
+        let missing = Store(cli: CLI(executable: fake.dir.appending(path: "missing")), defaults: fresh())
         await missing.refresh()
         #expect(missing.error?.code == "CVEDEX_ERROR")
     }
 
     @Test func loginAndLogout() async throws {
         let fake = try Fake([ok(""), ok(alice), ok(reserved), ok(""), ok(loggedOut)])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         try await store.login(url: "https://cveawg-test.mitre.org", org: "acme", user: "alice@acme.test", key: "k")
         #expect(fake.stdin(1) == "k\n")
         #expect(store.status?.loggedIn == true)
@@ -120,14 +133,14 @@ let published = """
 
     @Test func reserve() async throws {
         let fake = try Fake([ok(reserved), ok(alice), ok(reserved)])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         #expect(try await store.reserve() == "CVE-2026-1100")
         #expect(fake.calls.first == "reserve --json")
     }
 
     @Test func record() async throws {
         let fake = try Fake([ok(published), fail(notFound), fail(#"{"error":"FORBIDDEN","message":"no"}"#)])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         let record = try #require(try await store.record("CVE-2026-1099"))
         #expect(record.state == "PUBLISHED")
         #expect(record.title == "widget: Path traversal")
@@ -135,10 +148,28 @@ let published = """
         #expect(record.descriptions == ["Widget serves files outside its root."])
         #expect(
             record.affected == [
-                "acme widget\n0 to before 1.2.3: affected\n2.0 to 2.1: affected\n3.0: unaffected", "gadget",
+                Record.Affected(
+                    name: "acme widget",
+                    versions: [("0 to before 1.2.3", "affected"), ("2.0 to 2.1", "affected"), ("3.0", "unaffected")]),
+                Record.Affected(name: "gadget", versions: []),
             ])
+        #expect(record.affected[0] != Record.Affected(name: "acme widget", versions: []))
         #expect(record.cwes == ["CWE-22: Path Traversal"])
-        #expect(record.references == ["https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx"])
+        #expect(
+            record.scores == [
+                Record.Score(version: "4.0", score: 8.7, severity: "", vector: "CVSS:4.0/AV:N"),
+                Record.Score(
+                    version: "3.1", score: 7.5, severity: "HIGH", vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+                ),
+            ])
+        #expect(record.credits == ["bob (finder)", "carol"])
+        #expect(
+            record.references == [
+                Record.Link(
+                    url: "https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx",
+                    tags: ["vendor-advisory"]),
+                Record.Link(url: "https://github.com/acme/widget/pull/1", tags: []),
+            ])
         #expect(try await store.record("CVE-2026-1100") == nil)
         await #expect(throws: CLIError(code: "FORBIDDEN", message: "no")) { try await store.record("CVE-2026-1101") }
     }
@@ -149,12 +180,12 @@ let published = """
             ok(published), ok(rejected), fail(notFound), ok(#"{"containers":{}}"#),
             fail(#"{"error":"X","message":"x"}"#),
         ])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         let text = try await store.draft("CVE-2026-1099")
         #expect(text.hasPrefix("{\n  \"affected\" : ["))
         #expect(!text.contains("providerMetadata") && text.contains("https://github.com/acme/"))
         #expect(try await store.draft("CVE-2026-1100").contains("\"Duplicate.\""))
-        #expect(try await store.draft("CVE-2026-1101") == Store.template)
+        #expect(try await store.draft("CVE-2026-1101") == Container.blank.text)
         await #expect(throws: CLIError(code: "CVEDEX_ERROR", message: "CVE-2026-1102 has no CNA container")) {
             try await store.draft("CVE-2026-1102")
         }
@@ -166,7 +197,7 @@ let published = """
     @Test func check() async throws {
         let invalid = #"{"error":"INVALID_RECORD","message":"m","details":{"problems":["- missing properties"]}}"#
         let fake = try Fake([ok(#"{"valid":true}"#), fail(invalid), fail(#"{"error":"CVEDEX_ERROR","message":"bad"}"#)])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         #expect(await store.check("{}") == [])
         #expect(fake.stdin(1) == "{}")
         #expect(await store.check("{}") == ["- missing properties"])
@@ -178,7 +209,7 @@ let published = """
         let fake = try Fake([
             ok("{}"), ok(loggedOut), ok(#"{"state":"in_review"}"#), ok(loggedOut), ok("{}"), ok(loggedOut),
         ])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         #expect(try await store.send("CVE-2026-1100", container: "{}", publish: true) == "Published CVE-2026-1100")
         #expect(
             try await store.send("CVE-2026-1100", container: "{}", publish: true) == "Sent CVE-2026-1100 for review")
@@ -187,9 +218,27 @@ let published = """
         #expect(fake.calls[4] == "update CVE-2026-1100 - --yes --json")
     }
 
+    @Test func drafts() async throws {
+        let fake = try Fake([ok("{}"), ok(loggedOut)])
+        let defaults = fresh()
+        let store = Store(cli: CLI(executable: fake.executable), defaults: defaults)
+        store.saveDraft("CVE-2026-1100", container: "{\"title\":\"t\"}")
+        store.saveDraft("CVE-2026-1101", container: "{}")
+        #expect(try await store.draft("CVE-2026-1100") == "{\"title\":\"t\"}")
+        #expect(fake.calls.isEmpty)
+        #expect(
+            Store(cli: CLI(executable: fake.executable), defaults: defaults).drafts == [
+                "CVE-2026-1100", "CVE-2026-1101",
+            ])
+        store.discardDraft("CVE-2026-1101")
+        _ = try await store.send("CVE-2026-1100", container: "{}", publish: true)
+        #expect(store.drafts.isEmpty)
+        #expect(Store(cli: CLI(executable: fake.executable), defaults: defaults).drafts.isEmpty)
+    }
+
     @Test func rejectAndImport() async throws {
         let fake = try Fake([ok("{}"), ok(loggedOut), ok("{\"title\":\"t\"}\n")])
-        let store = Store(cli: CLI(executable: fake.executable))
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         try await store.reject("CVE-2026-1100", reason: "Duplicate.")
         #expect(fake.calls[0] == "reject CVE-2026-1100 --reason Duplicate. --yes --json")
         #expect(

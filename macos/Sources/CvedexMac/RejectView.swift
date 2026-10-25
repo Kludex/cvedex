@@ -20,6 +20,7 @@ struct RejectView: View {
             } footer: {
                 Text("A published ID gets a rejected record in place of its record. In English.")
                     .foregroundStyle(.secondary)
+                    .footnote()
             }
             if let failure {
                 Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red)

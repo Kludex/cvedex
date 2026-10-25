@@ -12,14 +12,50 @@ struct CvedexMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("cvedex") {
+        Window("cvedex", id: "main") {
             if let store {
-                ContentView().environment(store)
+                RootView().environment(store)
             } else {
                 ContentUnavailableView(
                     "cvedex not found", systemImage: "exclamationmark.triangle",
                     description: Text("Install cvedex on your PATH, or run the app from its bundle."))
             }
         }
+        .defaultSize(width: 1180, height: 780)
+        .defaultLaunchBehavior(.presented)
+        .commands {
+            CommandGroup(replacing: .newItem) {}
+            if let store {
+                CommandGroup(after: .toolbar) {
+                    Button("Refresh") { Task { await store.refresh() } }.keyboardShortcut("r")
+                }
+            }
+        }
+    }
+}
+
+/// The welcome screen until you log in, then the IDs and their records.
+struct RootView: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        ZStack {
+            if store.status?.loggedIn == false {
+                WelcomeView()
+            } else if store.status == nil, let error = store.error {
+                ContentUnavailableView {
+                    Label("Could not run cvedex", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error.message)
+                } actions: {
+                    Button("Try Again") { Task { await store.refresh() } }
+                }
+            } else if store.status == nil {
+                ProgressView()
+            } else {
+                MainView()
+            }
+        }
+        .task { await store.refresh() }
     }
 }

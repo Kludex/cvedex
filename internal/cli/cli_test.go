@@ -287,7 +287,7 @@ func TestCommands(t *testing.T) {
 		{name: "publish a file that is not JSON", args: []string{"publish", "CVE-2026-1100", broken}, code: 1,
 			stderr: []string{"broken.json is not a JSON object"}},
 		{name: "publish a file that is not JSON, as JSON", args: []string{"publish", "CVE-2026-1100", broken, "--json"},
-			code: 1, stderr: []string{`{"error":"CVEDEX_ERROR","message":"` + broken + ` is not a JSON object: `}},
+			code: 1, stderr: []string{`{"error":"CVEDEX_ERROR","message":"`, `broken.json is not a JSON object: `}},
 		{name: "record check", args: []string{"record", "check", bare},
 			stdout: []string{"The record is a valid CNA container"}},
 		{name: "record check as JSON", args: []string{"record", "check", "--json", "-"}, stdin: string(sent.CNA),

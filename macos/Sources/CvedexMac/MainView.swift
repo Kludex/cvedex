@@ -4,16 +4,17 @@ import SwiftUI
 struct MainView: View {
     @Environment(Store.self) private var store
     @State private var selection: String?
+    @State private var created: String?
     @State private var query = ""
 
     var body: some View {
         NavigationSplitView {
-            Sidebar(selection: $selection, query: query)
+            Sidebar(selection: $selection, created: $created, query: query)
                 .searchable(text: $query, placement: .sidebar, prompt: "Search IDs")
                 .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 360)
         } detail: {
             if let id = store.ids.first(where: { $0.id == selection }) {
-                RecordView(id: id).id(id.id)
+                RecordView(id: id, editing: id.id == created).id(id.id)
             } else {
                 ContentUnavailableView(
                     "No ID Selected", systemImage: "shield.lefthalf.filled",
@@ -21,14 +22,17 @@ struct MainView: View {
                         "Pick an ID in the sidebar to read its record, or reserve one to write a new record."))
             }
         }
+        .onChange(of: selection) { if selection != created { created = nil } }
     }
 }
 
 struct Sidebar: View {
     @Environment(Store.self) private var store
     @Binding var selection: String?
+    @Binding var created: String?
     let query: String
     @State private var reserving = false
+    @State private var importing = false
     @State private var failure: String?
 
     private let groups = [("RESERVED", "Reserved"), ("PUBLISHED", "Published"), ("REJECTED", "Rejected")]
@@ -58,7 +62,8 @@ struct Sidebar: View {
                 if query.isEmpty {
                     ContentUnavailableView(
                         "No IDs Yet", systemImage: "tray",
-                        description: Text("Reserve an ID before you write its record."))
+                        description: Text("Reserve an ID before you write its record, or start from a GitHub advisory.")
+                    )
                 } else {
                     ContentUnavailableView.search(text: query)
                 }
@@ -67,8 +72,13 @@ struct Sidebar: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { AccountBar() }
         .toolbar {
             ToolbarItemGroup {
-                Button("Reserve ID", systemImage: "plus") { reserving = true }
-                    .help("Reserve a CVE ID for this year")
+                Menu("New", systemImage: "plus") {
+                    Button("Reserve ID…") { reserving = true }
+                    Button("New from GitHub Advisory…") { importing = true }
+                } primaryAction: {
+                    reserving = true
+                }
+                .help("Reserve a CVE ID for this year, or hold to start one from a GitHub advisory")
             }
         }
         .confirmationDialog(
@@ -86,6 +96,20 @@ struct Sidebar: View {
             }
         } message: {
             Text("It counts against your CNA's quota until you publish or reject it.")
+        }
+        .sheet(isPresented: $importing) {
+            AdvisoryForm(
+                title: "New CVE from a GitHub Advisory",
+                message: "Reserves a CVE ID for \(String(Calendar.current.component(.year, from: .now))), which counts "
+                    + "against your CNA's quota, and fills in its record from the advisory. Nothing is published "
+                    + "until you review the record.",
+                action: "Reserve and Import",
+                cancel: { importing = false }
+            ) { url in
+                created = try await store.reserve(fromAdvisory: url)
+                selection = created
+                importing = false
+            }
         }
         .alert("Could not reserve an ID", isPresented: .constant(failure != nil), presenting: failure) { _ in
             Button("OK") { failure = nil }

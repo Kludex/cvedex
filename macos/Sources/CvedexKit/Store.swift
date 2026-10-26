@@ -59,6 +59,15 @@ public final class Store {
         return reserved.first?.cveId
     }
 
+    /// Reserves an ID and starts its draft from a GitHub advisory. The advisory is fetched first, so a URL that
+    /// fails reserves nothing.
+    public func reserve(fromAdvisory url: String) async throws -> String? {
+        let container = try await fromAdvisory(url)
+        guard let id = try await reserve() else { return nil }
+        saveDraft(id, container: container)
+        return id
+    }
+
     /// The record of `id`, or nil while it has none.
     public func record(_ id: String) async throws -> Record? {
         do {

@@ -9,8 +9,14 @@ struct RecordView: View {
     @State private var record: Record?
     @State private var loaded = false
     @State private var failure: String?
-    @State private var editing = false
+    @State private var editing: Bool
     @State private var rejecting = false
+    @State private var importing = false
+
+    init(id: CVEID, editing: Bool = false) {
+        self.id = id
+        _editing = State(initialValue: editing)
+    }
 
     var body: some View {
         Group {
@@ -27,6 +33,19 @@ struct RecordView: View {
         .navigationSubtitle(record?.title ?? "")
         .task { await load() }
         .sheet(isPresented: $rejecting) { RejectView(id: id.cveId) }
+        .sheet(isPresented: $importing) {
+            AdvisoryForm(
+                title: "Import a GitHub Advisory",
+                message: "Fills in the record of \(id.cveId) from a repository security advisory. "
+                    + "You can edit everything before you publish.",
+                action: "Import",
+                cancel: { importing = false }
+            ) { url in
+                store.saveDraft(id.cveId, container: try await store.fromAdvisory(url))
+                importing = false
+                editing = true
+            }
+        }
     }
 
     private var document: some View {
@@ -59,6 +78,7 @@ struct RecordView: View {
                         )
                     } actions: {
                         Button("Write Record") { editing = true }.buttonStyle(.borderedProminent)
+                        Button("Import Advisory…") { importing = true }
                     }
                     .padding(.top, 40)
                 } else if !loaded {

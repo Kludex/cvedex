@@ -19,7 +19,7 @@ open macos/build/cvedex.app
 | Where | What you do |
 | --- | --- |
 | Sidebar | Browse your CVE IDs by state, or search them |
-| <kbd>+</kbd> in the toolbar | Reserve an ID for this year |
+| <kbd>+</kbd> in the toolbar | Reserve an ID for this year. Its menu also has **New from GitHub Advisory**. |
 | An ID | Read its record: description, affected versions, severity, weaknesses, references and credits |
 | **Write Record** or **Edit Record** | Build the record in a form, or edit it as JSON, then publish or update it |
 | **More** > **Reject** | Reject the ID, with a reason |
@@ -44,8 +44,20 @@ The status bar runs the [schema check](records.md#checked-before-sending) as you
 
 **JSON** in the toolbar shows the same record as the CNA container, the file `cvedex publish` takes. Edits in either view show up in the other. Fields the form has no control for stay as they are.
 
-!!! tip "Start from a GitHub advisory"
-    The import button in the toolbar fills the whole form from a repository security advisory, as [`cvedex record from-advisory`](records.md#from-a-github-advisory) does. Check it, add what GitHub does not know, and publish.
+### From a GitHub advisory
+
+A repository security advisory already has most of a record, so you can start from one, as [`cvedex record from-advisory`](records.md#from-a-github-advisory) does:
+
+| Where | What happens |
+| --- | --- |
+| **+** > **New from GitHub Advisory** | Reserves an ID for this year and opens its builder, filled in from the advisory |
+| **Import Advisory** on an ID with no record | Fills in that ID's record |
+| The import button in the editor's toolbar | Replaces the record you are editing |
+
+The app fetches the advisory before it reserves anything, so a wrong URL costs no ID. Check what it filled in, add what GitHub does not know, and publish.
+
+!!! info "Draft advisories need a GitHub token"
+    GitHub only shows a draft advisory to its repository's maintainers. Open the app from a terminal with `open --env GH_TOKEN="$(gh auth token)" macos/build/cvedex.app` to import one.
 
 ### Drafts
 

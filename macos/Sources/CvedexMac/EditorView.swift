@@ -17,7 +17,6 @@ struct EditorView: View {
     @State private var showingProblems = false
     @State private var revealed = false
     @State private var importing = false
-    @State private var advisory = ""
     @State private var busy = false
     @State private var confirming = false
     @State private var failure: String?
@@ -62,7 +61,17 @@ struct EditorView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Import Advisory", systemImage: "square.and.arrow.down") { importing = true }
                     .help("Fill the record from a GitHub security advisory")
-                    .popover(isPresented: $importing, arrowEdge: .bottom) { importForm }
+                    .popover(isPresented: $importing, arrowEdge: .bottom) {
+                        AdvisoryForm(
+                            title: "Import a GitHub Advisory",
+                            message: "Fills in the record from a repository security advisory, replacing what is here. "
+                                + "You can edit everything after.",
+                            action: "Import"
+                        ) { url in
+                            text = try await store.fromAdvisory(url)
+                            importing = false
+                        }
+                    }
                 Button("Close Editor", systemImage: "xmark") { close() }
                     .help("Close the editor. Your draft is kept.")
                 Button("\(verb)…") { confirming = true }
@@ -150,48 +159,6 @@ struct EditorView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.bar)
-    }
-
-    private var importForm: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Import a GitHub Advisory").font(.headline)
-            Text(
-                "Fills in the record from a repository security advisory, replacing what is here. You can edit everything after."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            TextField(
-                "Advisory URL", text: $advisory,
-                prompt: Text("https://github.com/acme/widget/security/advisories/GHSA-…")
-            )
-            .textFieldStyle(.roundedBorder)
-            .onSubmit(importAdvisory)
-            HStack {
-                if busy { ProgressView().controlSize(.small) }
-                Spacer()
-                Button("Import", action: importAdvisory)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(advisory.isEmpty || busy)
-            }
-        }
-        .padding()
-        .frame(width: 440)
-    }
-
-    private func importAdvisory() {
-        guard !advisory.isEmpty else { return }
-        busy = true
-        Task {
-            defer { busy = false }
-            do {
-                text = try await store.fromAdvisory(advisory.trimmingCharacters(in: .whitespaces))
-                failure = nil
-                importing = false
-            } catch {
-                failure = error.localizedDescription
-            }
-        }
     }
 
     private func send() async {

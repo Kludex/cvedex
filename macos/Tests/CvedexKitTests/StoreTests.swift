@@ -236,6 +236,27 @@ let published = """
         #expect(Store(cli: CLI(executable: fake.executable), defaults: defaults).drafts.isEmpty)
     }
 
+    @Test func reserveFromAdvisory() async throws {
+        let advisory = "https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx"
+        let fake = try Fake([
+            fail(#"{"error":"CVEDEX_ERROR","message":"GitHub found no published advisory"}"#),
+            ok("{\"title\":\"t\"}\n"), ok(reserved), ok(alice), ok(reserved),
+            ok("{}"), ok("[]"), ok(alice), ok("null"),
+        ])
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
+        await #expect(throws: CLIError(code: "CVEDEX_ERROR", message: "GitHub found no published advisory")) {
+            try await store.reserve(fromAdvisory: advisory)
+        }
+        #expect(fake.calls == ["record from-advisory \(advisory) --json"])
+        #expect(try await store.reserve(fromAdvisory: advisory) == "CVE-2026-1100")
+        #expect(fake.calls[2] == "reserve --json")
+        #expect(store.drafts == ["CVE-2026-1100"] && store.ids.map(\.id) == ["CVE-2026-1100"])
+        #expect(try await store.draft("CVE-2026-1100") == "{\"title\":\"t\"}\n")
+        store.discardDraft("CVE-2026-1100")
+        #expect(try await store.reserve(fromAdvisory: advisory) == nil)
+        #expect(store.drafts.isEmpty)
+    }
+
     @Test func rejectAndImport() async throws {
         let fake = try Fake([ok("{}"), ok(loggedOut), ok("{\"title\":\"t\"}\n")])
         let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())

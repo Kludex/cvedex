@@ -69,7 +69,18 @@ struct RecordView: View {
                     Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 } else if let record {
                     RecordBody(record: record)
-                } else if loaded && !store.drafts.contains(id.cveId) && id.state == "RESERVED" {
+                }
+            }
+            .padding(32)
+            .frame(maxWidth: 820, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        // Centered in the whole pane, not the document column, which is off-center in a wide window.
+        .overlay {
+            if failure == nil && record == nil {
+                if !loaded {
+                    ProgressView()
+                } else if !store.drafts.contains(id.cveId) && id.state == "RESERVED" {
                     ContentUnavailableView {
                         Label("No Record Yet", systemImage: "doc.badge.plus")
                     } description: {
@@ -80,14 +91,8 @@ struct RecordView: View {
                         Button("Write Record") { editing = true }.buttonStyle(.borderedProminent)
                         Button("Import Advisory…") { importing = true }
                     }
-                    .padding(.top, 40)
-                } else if !loaded {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                 }
             }
-            .padding(32)
-            .frame(maxWidth: 820, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {

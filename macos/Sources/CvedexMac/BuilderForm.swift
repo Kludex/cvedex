@@ -62,38 +62,17 @@ struct BuilderForm: View {
             }
 
             Section {
-                Toggle(
-                    "CVSS 3.1 score",
-                    isOn: Binding(get: { container.cvss != nil }, set: { container.cvss = $0 ? CVSS31() : nil }))
-                if let cvss = container.cvss {
-                    ForEach(CVSS31.metrics, id: \.key) { metric in
-                        Picker(
-                            metric.name,
-                            selection: Binding(
-                                get: { container.cvss?.values[metric.key] ?? "" },
-                                set: { container.cvss?.values[metric.key] = $0 })
-                        ) {
-                            ForEach(metric.options, id: \.value) { Text($0.name).tag($0.value) }
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                    LabeledContent("Score") {
-                        HStack(spacing: 8) {
-                            Text(cvss.vector).font(.callout.monospaced()).foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                            Badge(
-                                text: "\(Style.score(cvss.score)) \(cvss.severity.capitalized)",
-                                color: Style.severity(cvss.severity))
-                        }
-                    }
-                }
+                ScoreRows(title: "CVSS 4.0 score", score: $container.cvss4)
+            } header: {
+                Header("Severity", hint: "CVSS 4.0 is the current version. Add 3.1 too if your users still rely on it.")
+            }
+            Section {
+                ScoreRows(title: "CVSS 3.1 score", score: $container.cvss)
                 ForEach(container.otherScores, id: \.self) { score in
                     LabeledContent("Also in the record") {
                         Text(score).font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 }
-            } header: {
-                Text("Severity")
             }
 
             Section {
@@ -162,13 +141,23 @@ private struct ProductSection: View {
                 Text("Affected").tag("affected")
                 Text("Unknown").tag("unknown")
             }
+            if !product.versions.isEmpty {
+                Picker("Version scheme", selection: $product.versionType) {
+                    if product.versions.allSatisfy({ $0.range == .single }) { Text("None").tag("") }
+                    ForEach(Version.types, id: \.self) { Text($0).tag($0) }
+                    if !product.versionType.isEmpty, !Version.types.contains(product.versionType) {
+                        Text(product.versionType).tag(product.versionType)
+                    }
+                }
+                .help("How versions compare: semver for 1.2.3, python for PEP 440, git for commits")
+            }
             ForEach(product.versions.indices, id: \.self) { j in
                 VersionRow(version: $product.versions.element(j, blank: .blank)) { product.versions.remove(at: j) }
                     .issue(
                         problems, "\(path)/versions/\(j)", "\(path)/versions/\(j)/\(product.versions[j].range.rawValue)"
                     )
             }
-            Button("Add Versions", systemImage: "plus") { product.versions.append(.blank) }
+            Button("Add Versions", systemImage: "plus") { product.addVersion() }
                 .buttonStyle(.borderless)
                 .issue(problems, path)
         } header: {
@@ -190,6 +179,54 @@ private struct ProductSection: View {
     }
 }
 
+/// A CVSS score: a toggle to add it, a segmented picker per metric, and the vector and score they make.
+private struct ScoreRows<Score: CVSSScore>: View {
+    let title: String
+    @Binding var score: Score?
+
+    private static var groups: [String: String] {
+        ["VC": "Impact on the vulnerable system", "SC": "Impact on subsequent systems"]
+    }
+
+    /// The 4.0 impact metrics share names, so VoiceOver gets which system each is about.
+    private static func label(_ metric: CVSSMetric) -> String {
+        switch metric.key {
+        case "VC", "VI", "VA": "Vulnerable system \(metric.name.lowercased())"
+        case "SC", "SI", "SA": "Subsequent system \(metric.name.lowercased())"
+        default: metric.name
+        }
+    }
+
+    var body: some View {
+        Toggle(title, isOn: Binding(get: { score != nil }, set: { score = $0 ? Score() : nil }))
+        if let score {
+            ForEach(Score.metrics, id: \.key) { metric in
+                if let group = Self.groups[metric.key] {
+                    Text(group).font(.callout).foregroundStyle(.secondary).padding(.top, 4)
+                }
+                Picker(
+                    metric.name,
+                    selection: Binding(
+                        get: { self.score?.values[metric.key] ?? "" }, set: { self.score?.values[metric.key] = $0 })
+                ) {
+                    ForEach(metric.options, id: \.value) { Text($0.name).tag($0.value) }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel(Self.label(metric))
+            }
+            LabeledContent("Score") {
+                HStack(spacing: 8) {
+                    Text(score.vector).font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        .lineLimit(2)
+                    Badge(
+                        text: "\(Style.score(score.score)) \(score.severity.capitalized)",
+                        color: Style.severity(score.severity))
+                }
+            }
+        }
+    }
+}
+
 /// One version or range: "Affected from 0 before 1.2.3".
 private struct VersionRow: View {
     @Binding var version: Version
@@ -208,7 +245,7 @@ private struct VersionRow: View {
             TextField("Version", text: $version.version, prompt: Text("0"))
                 .labelsHidden()
                 .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 70)
+                .frame(minWidth: 70, maxWidth: 140)
             Picker("Range", selection: $version.range) {
                 Text("only").tag(Version.Range.single)
                 Text("before").tag(Version.Range.below)
@@ -220,18 +257,9 @@ private struct VersionRow: View {
                 TextField("Up to", text: $version.limit, prompt: Text("1.2.3"))
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 70)
+                    .frame(minWidth: 70, maxWidth: 140)
             }
-            Picker("Version type", selection: $version.versionType) {
-                if version.range == .single { Text("any").tag("") }
-                ForEach(Version.types, id: \.self) { Text($0).tag($0) }
-                if !version.versionType.isEmpty, !Version.types.contains(version.versionType) {
-                    Text(version.versionType).tag(version.versionType)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
-            .help("How versions compare: semver for 1.2.3, python for PEP 440, git for commits")
+            Spacer(minLength: 0)
             RemoveButton(action: remove)
         }
     }

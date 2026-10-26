@@ -27,6 +27,7 @@ public actor CLI {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments + ["--json"]
+        process.environment = Self.environment
         let stdin = Pipe()
         let stdout = Pipe()
         let stderr = Pipe()
@@ -55,6 +56,15 @@ public actor CLI {
         }
         return data
     }
+
+    /// The app's environment, with Homebrew on `PATH` so `cvedex` finds `gh` in an app opened from Finder, which
+    /// gets only the system's directories.
+    private static let environment = ProcessInfo.processInfo.environment.merging(
+        [
+            "PATH": [ProcessInfo.processInfo.environment["PATH"], "/opt/homebrew/bin", "/usr/local/bin"]
+                .compactMap(\.self).joined(separator: ":")
+        ]
+    ) { _, new in new }
 
     private static func readAll(_ handle: FileHandle) async -> Data {
         await withCheckedContinuation { continuation in

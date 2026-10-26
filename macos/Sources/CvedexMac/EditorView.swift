@@ -19,6 +19,7 @@ struct EditorView: View {
     @State private var importing = false
     @State private var busy = false
     @State private var confirming = false
+    @State private var changes: [DiffLine]?
     @State private var failure: String?
 
     enum Mode: String, CaseIterable {
@@ -74,9 +75,15 @@ struct EditorView: View {
                     }
                 Button("Close Editor", systemImage: "xmark") { close() }
                     .help("Close the editor. Your draft is kept.")
-                Button("\(verb)…") { confirming = true }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(problems != [] || parseError != nil || busy)
+                Button("\(verb)…") {
+                    if publish {
+                        confirming = true
+                    } else {
+                        Task { await review() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(problems != [] || parseError != nil || busy)
             }
         }
         .task {
@@ -117,6 +124,25 @@ struct EditorView: View {
             Button(verb) { Task { await send() } }
         } message: {
             Text("The record becomes public.")
+        }
+        .sheet(isPresented: Binding(get: { changes != nil }, set: { if !$0 { changes = nil } })) {
+            UpdateReview(
+                id: id, production: store.status?.isProduction == true, changes: changes ?? [],
+                cancel: { changes = nil },
+                update: {
+                    changes = nil
+                    Task { await send() }
+                })
+        }
+    }
+
+    /// Shows what the update changes in the published record before it goes out.
+    private func review() async {
+        do {
+            let published = try await store.published(id) ?? ""
+            changes = DiffLine.lines(from: published, to: (try? Container(text: text))?.text ?? text)
+        } catch {
+            failure = error.localizedDescription
         }
     }
 
@@ -183,6 +209,66 @@ struct EditorView: View {
         default:
             return error.localizedDescription
         }
+    }
+}
+
+/// What an update changes in the published record, line by line, with Update and Cancel.
+private struct UpdateReview: View {
+    let id: String
+    let production: Bool
+    let changes: [DiffLine]
+    let cancel: () -> Void
+    let update: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(production ? "Update \(id) on MITRE production?" : "Update \(id)?").font(.headline)
+            Text(
+                changes.isEmpty
+                    ? "Your record is the same as the published one, so there is nothing to update."
+                    : "These changes to the published record become public."
+            )
+            .foregroundStyle(.secondary)
+            if !changes.isEmpty {
+                ScrollView([.vertical, .horizontal]) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(changes.indices, id: \.self) { row($0) }
+                    }
+                    .font(.callout.monospaced())
+                    .textSelection(.enabled)
+                    .padding(.vertical, 6)
+                }
+                .background(.background.secondary, in: .rect(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                Button("Update", action: update)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(changes.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 680, height: changes.isEmpty ? nil : 460)
+    }
+
+    private func row(_ index: Int) -> some View {
+        let (mark, text, color): (String, String, Color?) =
+            switch changes[index] {
+            case .same(let line): (" ", line, nil)
+            case .removed(let line): ("-", line, .red)
+            case .added(let line): ("+", line, .green)
+            case .skipped(let count): ("", count == 1 ? "1 unchanged line" : "\(count) unchanged lines", nil)
+            }
+        return HStack(spacing: 8) {
+            Text(mark).foregroundStyle(color ?? .secondary).frame(width: 10)
+            Text(text).foregroundStyle(mark.isEmpty ? .secondary : .primary).italic(mark.isEmpty)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 1)
+        .background(color?.opacity(0.15) ?? .clear)
     }
 }
 

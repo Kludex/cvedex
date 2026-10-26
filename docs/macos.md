@@ -18,14 +18,14 @@ open macos/build/cvedex.app
 
 | Where | What you do |
 | --- | --- |
-| Sidebar | Browse your CVE IDs by state, or search them |
+| Sidebar | Browse your CVE IDs by state, each with its title, or search IDs and titles |
 | <kbd>+</kbd> in the toolbar | Reserve an ID for this year. Its menu also has **New from GitHub Advisory**. |
 | An ID | Read its record: description, affected versions, severity, weaknesses, references and credits |
 | **Write Record** or **Edit Record** | Build the record in a form, or edit it as JSON, then publish or update it |
 | **More** > **Reject** | Reject the ID, with a reason |
 | The foot of the sidebar | See who you are logged in as and where, switch account, log out |
 
-Every write asks first. The dialog names the ID and says it will be public.
+Every write asks first. The dialog names the ID and says it will be public. **Update** also shows what changes in the published record, line by line, and stays off when nothing does.
 
 ## The builder
 
@@ -34,9 +34,9 @@ Every write asks first. The dialog names the ID and says it will be public.
 | Section | What you fill in |
 | --- | --- |
 | Summary and Description | A title, and what an attacker can do. The description takes Markdown. |
-| Affected product | Vendor, product, repository, package registry, and the versions, such as *affected from 0 before 1.2.3* |
+| Affected product | Vendor, product, repository, package registry, the version scheme, and the versions, such as *affected from 0 before 1.2.3* |
 | Weaknesses | CWE IDs, picked from MITRE's list by number or by name |
-| Severity | A CVSS 3.1 score. Pick each metric, and the app computes the vector and the score. |
+| Severity | A CVSS 4.0 score, a CVSS 3.1 score, or both. Pick each metric, and the app computes the vector and the score. |
 | References | Links, each tagged as an advisory, a patch, release notes and so on |
 | Credits | Who found, reported or fixed it |
 
@@ -56,8 +56,14 @@ A repository security advisory already has most of a record, so you can start fr
 
 The app fetches the advisory before it reserves anything, so a wrong URL costs no ID. Check what it filled in, add what GitHub does not know, and publish.
 
-!!! info "Draft advisories need a GitHub token"
-    GitHub only shows a draft advisory to its repository's maintainers. Open the app from a terminal with `open --env GH_TOKEN="$(gh auth token)" macos/build/cvedex.app` to import one.
+!!! info "Draft advisories need your GitHub login"
+    GitHub only shows a draft advisory to its repository's maintainers. The app uses the [GitHub CLI](https://cli.github.com)'s login, so run `gh auth login` once.
+
+### Scores
+
+The form computes CVSS 4.0 scores the way [FIRST's calculator](https://www.first.org/cvss/calculator/4.0) does, from the base metrics. A 4.0 vector from an advisory can also carry threat, environmental and supplemental metrics. The form keeps them and scores with them, though it only shows the base ones.
+
+A score the form cannot read, such as CVSS 2.0, shows under **Also in the record** and stays as it is.
 
 ### Drafts
 

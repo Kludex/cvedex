@@ -23,6 +23,7 @@ struct Fake {
             n=$(($(cat "$d/count") + 1))
             echo $n > "$d/count"
             printf '%s\\n' "$@" > "$d/args.$n"
+            printf '%s' "$PATH" > "$d/path.$n"
             cat > "$d/stdin.$n"
             cat "$d/out.$n"
             cat "$d/err.$n" >&2
@@ -40,6 +41,10 @@ struct Fake {
 
     func stdin(_ call: Int) -> String {
         (try? String(contentsOf: dir.appending(path: "stdin.\(call)"), encoding: .utf8)) ?? ""
+    }
+
+    func path(_ call: Int) -> String {
+        (try? String(contentsOf: dir.appending(path: "path.\(call)"), encoding: .utf8)) ?? ""
     }
 
     private func argsOf(_ call: Int) -> [String] {
@@ -178,7 +183,7 @@ let published = """
         let rejected = #"{"cnaContainer":{"rejectedReasons":[{"lang":"en","value":"Duplicate."}]}}"#
         let fake = try Fake([
             ok(published), ok(rejected), fail(notFound), ok(#"{"containers":{}}"#),
-            fail(#"{"error":"X","message":"x"}"#),
+            fail(#"{"error":"X","message":"x"}"#), fail(notFound),
         ])
         let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         let text = try await store.draft("CVE-2026-1099")
@@ -190,8 +195,33 @@ let published = """
             try await store.draft("CVE-2026-1102")
         }
         await #expect(throws: CLIError(code: "X", message: "x")) { try await store.draft("CVE-2026-1103") }
+        #expect(try await store.published("CVE-2026-1104") == nil)
         let decoded = try JSONDecoder().decode(Record.self, from: Data(rejected.utf8))
         #expect(decoded.state == "DRAFT" && decoded.rejectedReasons == ["Duplicate."])
+    }
+
+    @Test func titles() async throws {
+        let untitled = #"{"cnaContainer":{"descriptions":[{"lang":"en","value":"Untitled."}]}}"#
+        let fake = try Fake([ok(published), fail(#"{"error":"X","message":"x"}"#), ok(untitled)])
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
+        let ids = try JSONDecoder().decode(
+            [CVEID].self,
+            from: Data(
+                #"[{"cveId":"CVE-2026-1099","state":"PUBLISHED"},{"cveId":"CVE-2026-1098","state":"PUBLISHED"},"#
+                    .appending(#"{"cveId":"CVE-2026-1097","state":"PUBLISHED"},"#)
+                    .appending(#"{"cveId":"CVE-2026-1100","state":"RESERVED"}]"#).utf8))
+        for id in ids + ids {
+            await store.loadTitle(id)
+        }
+        #expect(fake.calls == ["show CVE-2026-1099 --json", "show CVE-2026-1098 --json", "show CVE-2026-1097 --json"])
+        #expect(store.title("CVE-2026-1097") == "Untitled.")
+        #expect(store.title("CVE-2026-1099") == "widget: Path traversal")
+        #expect(store.title("CVE-2026-1098") == nil && store.title("CVE-2026-1100") == nil)
+        store.saveDraft("CVE-2026-1100", container: #"{"title":"widget: Draft"}"#)
+        store.saveDraft("CVE-2026-1099", container: "{")
+        store.saveDraft("CVE-2026-1097", container: #"{"descriptions":[{"lang":"en","value":"Draft."}]}"#)
+        #expect(store.title("CVE-2026-1100") == "widget: Draft" && store.title("CVE-2026-1097") == "Draft.")
+        #expect(store.title("CVE-2026-1099") == "widget: Path traversal")
     }
 
     @Test func check() async throws {
@@ -265,6 +295,7 @@ let published = """
         #expect(
             try await store.fromAdvisory("https://github.com/a/b/security/advisories/GHSA-x") == "{\"title\":\"t\"}\n")
         #expect(fake.calls[2] == "record from-advisory https://github.com/a/b/security/advisories/GHSA-x --json")
+        #expect(fake.path(3).hasSuffix(":/opt/homebrew/bin:/usr/local/bin"))
     }
 }
 

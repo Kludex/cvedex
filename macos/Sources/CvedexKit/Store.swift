@@ -11,6 +11,8 @@ public final class Store {
     public var error: CLIError?
     /// The IDs with an unsent draft.
     public private(set) var drafts: Set<String>
+    /// Titles of published records, fetched as the sidebar shows them. Empty while loading, or with no title.
+    public private(set) var titles: [String: String] = [:]
 
     private let cli: CLI
     private let defaults: UserDefaults
@@ -77,17 +79,22 @@ public final class Store {
         }
     }
 
-    /// The CNA container of `id` to edit: your unsent draft, else the record without the `providerMetadata`
-    /// CVE Services fills in, else a blank one while it has no record.
+    /// The CNA container of `id` to edit: your unsent draft, else the published one, else a blank one.
     public func draft(_ id: String) async throws -> String {
         if let saved = defaults.string(forKey: "draft.\(id)") {
             return saved
         }
+        return try await published(id) ?? Container.blank.text
+    }
+
+    /// The CNA container `id` has published, without the `providerMetadata` CVE Services fills in, or nil while it
+    /// has no record.
+    public func published(_ id: String) async throws -> String? {
         let data: Data
         do {
             data = try await cli.run(["show", id])
         } catch let error as CLIError where error.code == "CVE_RECORD_DNE" {
-            return Container.blank.text
+            return nil
         }
         let record = try decoder.decode(JSONValue.self, from: data).object
         guard var cna = (record?["cnaContainer"] ?? record?["containers"]?.object?["cna"])?.object else {
@@ -124,6 +131,7 @@ public final class Store {
         let written = try await cli.run(
             [publish ? "publish" : "update", id, "-", "--yes"], input: Data(container.utf8))
         discardDraft(id)
+        titles[id] = nil
         await refresh()
         if (try? decoder.decode(Written.self, from: written))?.state == "in_review" {
             return "Sent \(id) for review"
@@ -133,7 +141,24 @@ public final class Store {
 
     public func reject(_ id: String, reason: String) async throws {
         _ = try await cli.run(["reject", id, "--reason", reason, "--yes"])
+        titles[id] = nil
         await refresh()
+    }
+
+    /// The title to show for `id`: your draft's, else the published record's once loaded. A record without a
+    /// title shows its description.
+    public func title(_ id: String) -> String? {
+        let saved = drafts.contains(id) ? defaults.string(forKey: "draft.\(id)") : nil
+        let draft = saved.flatMap { try? Container(text: $0) }.map { $0.title.isEmpty ? $0.summary : $0.title }
+        return [draft, titles[id]].compactMap(\.self).first { !$0.isEmpty }
+    }
+
+    /// Fetches the title of a published record, once.
+    public func loadTitle(_ id: CVEID) async {
+        guard id.state == "PUBLISHED", titles[id.cveId] == nil else { return }
+        titles[id.cveId] = ""
+        let record = (try? await record(id.cveId)) ?? nil
+        titles[id.cveId] = record?.title ?? record?.descriptions.first ?? ""
     }
 
     /// A CNA container built from a GitHub repository advisory.

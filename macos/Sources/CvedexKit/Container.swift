@@ -86,30 +86,39 @@ public struct Container: Equatable, Sendable {
 
     /// The CVSS 3.1 score, if the record has one.
     public var cvss: CVSS31? {
-        get {
-            metrics.lazy.compactMap { $0.object?["cvssV3_1"]?.object?["vectorString"]?.string }
-                .compactMap(CVSS31.init(vector:)).first
-        }
-        set {
-            var list = metrics.filter { $0.object?["cvssV3_1"] == nil }
-            if let newValue {
-                list.insert(.object(["cvssV3_1": newValue.json]), at: 0)
-            }
-            fields["metrics"] = list.isEmpty ? nil : .array(list)
-        }
+        get { score("cvssV3_1", CVSS31.init(vector:)) }
+        set { setScore("cvssV3_1", newValue?.json) }
     }
 
-    /// The other scores in the record, such as CVSS 4.0 from a GitHub advisory, which the form shows but does
-    /// not edit.
+    /// The CVSS 4.0 score, if the record has one.
+    public var cvss4: CVSS40? {
+        get { score("cvssV4_0", CVSS40.init(vector:)) }
+        set { setScore("cvssV4_0", newValue?.json) }
+    }
+
+    /// The other scores in the record, such as SSVC, which the form shows but does not edit.
     public var otherScores: [String] {
-        metrics.compactMap(\.object).flatMap { metric in
-            metric.filter { $0.key != "cvssV3_1" }.sorted { $0.key < $1.key }.map { key, value in
+        let edited = [cvss.map { _ in "cvssV3_1" }, cvss4.map { _ in "cvssV4_0" }]
+        return metrics.compactMap(\.object).flatMap { metric in
+            metric.filter { !edited.contains($0.key) }.sorted { $0.key < $1.key }.map { key, value in
                 let score = value.object
                 let name = score?["version"]?.string.map { "CVSS \($0)" } ?? key
                 let parts = [score?["baseScore"]?.number.map { String($0) }, score?["vectorString"]?.string]
                 return ([name] + parts.compactMap(\.self)).joined(separator: " ")
             }
         }
+    }
+
+    private func score<Score>(_ key: String, _ parse: (String) -> Score?) -> Score? {
+        metrics.lazy.compactMap { $0.object?[key]?.object?["vectorString"]?.string }.compactMap(parse).first
+    }
+
+    private mutating func setScore(_ key: String, _ json: JSONValue?) {
+        var list = metrics.filter { $0.object?[key] == nil }
+        if let json {
+            list.insert(.object([key: json]), at: 0)
+        }
+        fields["metrics"] = list.isEmpty ? nil : .array(list)
     }
 
     private var descriptions: [JSONValue] {
@@ -178,6 +187,25 @@ public struct Product: ContainerItem {
     public var versions: [Version] {
         get { fields.items("versions") }
         set { fields.setItems("versions", newValue, removeWhenEmpty: true) }
+    }
+
+    /// How the product's versions compare, such as `semver`. Setting it sets it on every version.
+    public var versionType: String {
+        get { versions.lazy.map(\.versionType).first { !$0.isEmpty } ?? "" }
+        set {
+            versions = versions.map {
+                var version = $0
+                version.versionType = newValue
+                return version
+            }
+        }
+    }
+
+    /// Adds a version range, compared the way the product's other versions are.
+    public mutating func addVersion() {
+        var version = Version.blank
+        if !versionType.isEmpty { version.versionType = versionType }
+        versions.append(version)
     }
 
     public static let registries: [(name: String, url: String)] = [

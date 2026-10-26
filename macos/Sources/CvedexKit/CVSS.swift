@@ -1,12 +1,25 @@
 import Foundation
 
+/// One metric of a CVSS vector, such as attack vector, with the values it takes.
+public struct CVSSMetric: Sendable {
+    public let key: String
+    public let name: String
+    public let options: [(value: String, name: String)]
+}
+
+/// A CVSS score the form edits metric by metric.
+public protocol CVSSScore: Equatable, Sendable {
+    static var metrics: [CVSSMetric] { get }
+    var values: [String: String] { get set }
+    var vector: String { get }
+    var score: Double { get }
+    var severity: String { get }
+    init()
+}
+
 /// A CVSS 3.1 base score, computed from its metrics as the specification does.
-public struct CVSS31: Equatable, Sendable {
-    public struct Metric: Sendable {
-        public let key: String
-        public let name: String
-        public let options: [(value: String, name: String)]
-    }
+public struct CVSS31: CVSSScore {
+    public typealias Metric = CVSSMetric
 
     public static let metrics = [
         Metric(

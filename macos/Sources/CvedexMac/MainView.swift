@@ -10,7 +10,7 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             Sidebar(selection: $selection, created: $created, query: query)
-                .searchable(text: $query, placement: .sidebar, prompt: "Search IDs")
+                .searchable(text: $query, placement: .sidebar, prompt: "Search IDs and titles")
                 .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 360)
         } detail: {
             if let id = store.ids.first(where: { $0.id == selection }) {
@@ -38,7 +38,13 @@ struct Sidebar: View {
     private let groups = [("RESERVED", "Reserved"), ("PUBLISHED", "Published"), ("REJECTED", "Rejected")]
 
     private var matching: [CVEID] {
-        let ids = query.isEmpty ? store.ids : store.ids.filter { $0.cveId.localizedCaseInsensitiveContains(query) }
+        let ids =
+            query.isEmpty
+            ? store.ids
+            : store.ids.filter {
+                $0.cveId.localizedCaseInsensitiveContains(query)
+                    || store.title($0.cveId)?.localizedCaseInsensitiveContains(query) == true
+            }
         return ids.sorted { $0.cveId.localizedStandardCompare($1.cveId) == .orderedDescending }
     }
 
@@ -48,7 +54,10 @@ struct Sidebar: View {
                 let ids = matching.filter { $0.state == state }
                 if !ids.isEmpty {
                     Section(name) {
-                        ForEach(ids) { IDRow(id: $0, draft: store.drafts.contains($0.id)) }
+                        ForEach(ids) { id in
+                            IDRow(id: id, title: store.title(id.cveId), draft: store.drafts.contains(id.id))
+                                .task(id: store.titles[id.cveId] == nil) { await store.loadTitle(id) }
+                        }
                     }
                 }
             }
@@ -121,6 +130,7 @@ struct Sidebar: View {
 
 private struct IDRow: View {
     let id: CVEID
+    let title: String?
     let draft: Bool
 
     var body: some View {
@@ -130,7 +140,7 @@ private struct IDRow: View {
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 Text(id.cveId).fontWeight(.medium).monospacedDigit()
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
             Spacer()
             if draft {
@@ -138,10 +148,12 @@ private struct IDRow: View {
             }
         }
         .padding(.vertical, 2)
+        .help(title ?? "")
     }
 
     private var detail: String {
         if id.cvedexd?.note != nil { return "Changes requested" }
+        if let title { return title }
         return id.reserved.map { "Reserved \(Style.day($0))" } ?? id.state.capitalized
     }
 }

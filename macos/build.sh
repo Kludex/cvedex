@@ -10,6 +10,10 @@ bin=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp "$bin/CvedexMac" "$app/Contents/MacOS/"
+mkdir -p "$app/Contents/Resources"
+rm -rf build/AppIcon.iconset
+swift icon.swift build/AppIcon.iconset
+iconutil -c icns -o "$app/Contents/Resources/AppIcon.icns" build/AppIcon.iconset
 
 for arch in arm64 amd64; do
     (cd .. && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -o "macos/build/cvedex-$arch" \
@@ -26,6 +30,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>cvedex</string>
     <key>CFBundleIdentifier</key><string>com.kludex.cvedex</string>
     <key>CFBundleExecutable</key><string>CvedexMac</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${version#v}</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>

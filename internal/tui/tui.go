@@ -82,7 +82,7 @@ func New(ctx context.Context, client *cveservices.Client) Model {
 	styles := table.DefaultStyles()
 	styles.Header = styles.Header.Faint(true).Bold(false)
 	styles.Selected = styles.Selected.Foreground(lipgloss.NoColor{}).Reverse(true).Bold(false)
-	return Model{
+	m := Model{
 		ctx:     ctx,
 		client:  client,
 		tabs:    []tab{tabIDs},
@@ -94,6 +94,9 @@ func New(ctx context.Context, client *cveservices.Client) Model {
 		loading: true,
 		drafts:  map[string]draft{},
 	}
+	// Rows can arrive before the first WindowSizeMsg, and the table needs its columns by then.
+	m.layout()
+	return m
 }
 
 type (

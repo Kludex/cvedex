@@ -39,8 +39,8 @@ func (a *app) recordCommand() *cobra.Command {
 		Long: "Fetches a GitHub repository advisory and prints the CNA container of a record built from it:\n" +
 			"title, description, affected versions, CWEs, CVSS scores, credits and references. Edit it, then\n" +
 			"publish it.\n\n" +
-			"Published advisories need no token. For a draft, set GH_TOKEN or GITHUB_TOKEN, for example\n" +
-			"GH_TOKEN=$(gh auth token).",
+			"Published advisories need no token. A draft needs your GitHub login: GH_TOKEN or GITHUB_TOKEN,\n" +
+			"else the GitHub CLI's, from gh auth login.",
 		Example: "  cvedex record from-advisory " + record.AdvisoryHint + " > record.json\n" +
 			"  cvedex publish CVE-2026-1234 record.json",
 		Args: cobra.ExactArgs(1),

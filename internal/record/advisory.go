@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
@@ -19,8 +21,8 @@ var advisoryURL = regexp.MustCompile(
 	`^https://github\.com/([^/]+)/([^/]+)/security/advisories/(GHSA(?:-[0-9a-z]{4}){3})/?$`)
 
 // FromAdvisory fetches a GitHub repository advisory and builds a CNA container from it. It
-// authenticates with GH_TOKEN or GITHUB_TOKEN when set, which drafts need, and reads the API at
-// GITHUB_API_URL, else https://api.github.com.
+// authenticates with GH_TOKEN or GITHUB_TOKEN, else the GitHub CLI's login, which drafts need, and
+// reads the API at GITHUB_API_URL, else https://api.github.com.
 func FromAdvisory(ctx context.Context, url string) (json.RawMessage, error) {
 	parts := advisoryURL.FindStringSubmatch(url)
 	if parts == nil {
@@ -29,6 +31,9 @@ func FromAdvisory(ctx context.Context, url string) (json.RawMessage, error) {
 	owner, repo, ghsa := parts[1], parts[2], parts[3]
 	api := cmp.Or(os.Getenv("GITHUB_API_URL"), "https://api.github.com")
 	token := cmp.Or(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN"))
+	if token == "" {
+		token = ghToken(ctx, api)
+	}
 	path := fmt.Sprintf("%s/repos/%s/%s/security-advisories/%s", strings.TrimSuffix(api, "/"), owner, repo, ghsa)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -46,8 +51,8 @@ func FromAdvisory(ctx context.Context, url string) (json.RawMessage, error) {
 	var a advisory
 	switch {
 	case res.StatusCode == http.StatusNotFound && token == "":
-		return nil, fmt.Errorf("GitHub found no published advisory %s in %s/%s. For a draft, set GH_TOKEN, "+
-			"for example GH_TOKEN=$(gh auth token)", ghsa, owner, repo)
+		return nil, fmt.Errorf("GitHub found no published advisory %s in %s/%s. For a draft, log in "+
+			"with gh auth login, or set GH_TOKEN", ghsa, owner, repo)
 	case res.StatusCode != http.StatusOK:
 		var body struct {
 			Message string `json:"message"`
@@ -167,6 +172,20 @@ var registries = map[string][2]string{
 	"rubygems": {"custom", "https://rubygems.org"},
 	"nuget":    {"custom", "https://www.nuget.org"},
 	"composer": {"custom", "https://packagist.org"},
+}
+
+// ghToken is the GitHub CLI's token for the API's host, or empty when gh is missing or logged out.
+// The host drops "api.", so api.github.com is github.com.
+func ghToken(ctx context.Context, api string) string {
+	u, err := neturl.Parse(api)
+	if err != nil {
+		return ""
+	}
+	out, err := exec.CommandContext(ctx, "gh", "auth", "token", "--hostname", strings.TrimPrefix(u.Host, "api.")).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 var link = regexp.MustCompile("https?://[^\\s<>()\\[\\]\"'`]+")

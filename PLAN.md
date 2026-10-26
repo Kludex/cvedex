@@ -93,7 +93,7 @@ cvedex submitter | submitter add <name> | submitter disable|enable <id>
 cvedex submitter token <id> [--agent] | submitter tokens <id> | submitter revoke <token-id>
 ```
 
-`record from-advisory` maps a repository advisory, drafts included with `GH_TOKEN`, the way GitHub's own CNA does: summary to a title led by the repo name ("widget: ..."), description, one `affected` entry per package with the range as `version`/`lessThan(OrEqual)` and the ecosystem's `versionType`, CWEs, CVSS 3.x and 4.0 metrics, credits, and references (the advisory, then the description's links). A range it cannot express is kept verbatim. It warns on stderr when the result fails the schema check. The TUI's `i` does the same into a draft.
+`record from-advisory` maps a repository advisory, drafts included with `GH_TOKEN`, `GITHUB_TOKEN` or else `gh auth token --hostname` for the API's host, the way GitHub's own CNA does: summary to a title led by the repo name ("widget: ..."), description, one `affected` entry per package with the range as `version`/`lessThan(OrEqual)` and the ecosystem's `versionType`, CWEs, CVSS 3.x and 4.0 metrics, credits, and references (the advisory, then the description's links). A range it cannot express is kept verbatim. It warns on stderr when the result fails the schema check. The TUI's `i` does the same into a draft.
 
 `review show` prints a summary, a diff against the previous revision or the published record, and the full JSON, so a field the summary leaves out cannot hide.
 

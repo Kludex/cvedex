@@ -49,7 +49,7 @@ EDITOR="code --wait" cvedex tui
 !!! tip "A rejected draft is kept"
     If the check or CVE Services rejects the record, the TUI shows the errors under the list. Press ++e++ again and your draft reopens with your edits, not the original.
 
-Press ++i++ on an ID instead to start from a GitHub repository advisory. Paste its URL and press ++enter++. The record [built from it](records.md#from-a-github-advisory) opens in your editor, as with ++e++. For a draft advisory, start the TUI with `GH_TOKEN` set.
+Press ++i++ on an ID instead to start from a GitHub repository advisory. Paste its URL and press ++enter++. The record [built from it](records.md#from-a-github-advisory) opens in your editor, as with ++e++. A draft advisory needs your [GitHub login](records.md#from-a-github-advisory).
 
 Drafts live in your temporary directory until they are sent. If you quit with drafts still unsent, the TUI asks first, then deletes them.
 

@@ -72,11 +72,13 @@ cvedex record from-advisory https://github.com/acme/widget/security/advisories/G
 | Credits | `credits`, by GitHub login |
 | The advisory and the links in its description | `references` |
 
-Published advisories need no token. A draft does: set `GH_TOKEN`, for example to your GitHub CLI's token.
+Published advisories need no token. A draft does, because GitHub only shows it to the repository's maintainers. `cvedex` uses the [GitHub CLI](https://cli.github.com)'s login when you have one, so this is enough:
 
 ```sh
-GH_TOKEN=$(gh auth token) cvedex record from-advisory https://github.com/acme/widget/security/advisories/GHSA-xxxx-xxxx-xxxx > record.json
+gh auth login
 ```
+
+`GH_TOKEN` or `GITHUB_TOKEN`, when set, wins over the GitHub CLI. Use one in CI, or for GitHub Enterprise without the CLI.
 
 !!! warning "Read it before you publish"
     The record is only as good as the advisory. Check the title reads well on its own, the version range is right, and a CWE is there. A range `cvedex` cannot express, such as `> 1.0`, is kept as GitHub wrote it, and needs a hand.

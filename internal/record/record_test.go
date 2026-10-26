@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -176,6 +179,7 @@ func TestFromAdvisoryText(t *testing.T) {
 func TestFromAdvisoryFailures(t *testing.T) {
 	tests := []struct {
 		name, url, api, token string
+		gh                    bool
 		exchanges             []cassette.Exchange
 		want                  string
 	}{
@@ -183,7 +187,11 @@ func TestFromAdvisoryFailures(t *testing.T) {
 			want: "is not a GitHub repository advisory, such as https://github.com/OWNER/REPO/security/advisories/GHSA-"},
 		{name: "a missing advisory", url: "https://github.com/Kludex/starlette/security/advisories/GHSA-xxxx-xxxx-xxxx",
 			exchanges: []cassette.Exchange{cassette.Load(t, "advisory-dne")},
-			want:      "GitHub found no published advisory GHSA-xxxx-xxxx-xxxx in Kludex/starlette. For a draft, set GH_TOKEN"},
+			want:      "GitHub found no published advisory GHSA-xxxx-xxxx-xxxx in Kludex/starlette. For a draft, log in"},
+		{name: "a missing advisory with gh logged in", gh: true,
+			url:       "https://github.com/Kludex/starlette/security/advisories/GHSA-xxxx-xxxx-xxxx",
+			exchanges: []cassette.Exchange{cassette.Load(t, "advisory-dne")},
+			want:      "GitHub answered 404 Not Found: Not Found"},
 		{name: "a missing advisory with a token", token: "token",
 			url:       "https://github.com/Kludex/starlette/security/advisories/GHSA-xxxx-xxxx-xxxx",
 			exchanges: []cassette.Exchange{cassette.Load(t, "advisory-dne")},
@@ -203,6 +211,18 @@ func TestFromAdvisoryFailures(t *testing.T) {
 			t.Setenv("GITHUB_API_URL", api)
 			t.Setenv("GH_TOKEN", "")
 			t.Setenv("GITHUB_TOKEN", tt.token)
+			if tt.gh {
+				if runtime.GOOS == "windows" {
+					t.Skip("the fake gh is a shell script")
+				}
+				host := strings.TrimPrefix(api, "http://")
+				dir := t.TempDir()
+				script := "#!/bin/sh\n[ \"$*\" = \"auth token --hostname " + host + "\" ] && echo gh-token\n"
+				if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			}
 			_, err := record.FromAdvisory(context.Background(), tt.url)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("error %v, want %q", err, tt.want)

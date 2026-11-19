@@ -69,7 +69,9 @@ struct LoginForm: View {
                 Section {
                     TextField("CNA short name", text: $org, prompt: Text("acme"))
                     TextField("Username", text: $user, prompt: Text("alice@acme.org"))
+                        .textContentType(.username)
                     SecureField("API key", text: $key)
+                        .textContentType(.password)
                 } footer: {
                     Group {
                         if let failure {

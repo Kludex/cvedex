@@ -47,7 +47,7 @@ Limit its **Deployment branches** to `main`.
 
 ### 3. Add the two workflows
 
-`cvedex reserve` runs the first one. It prints each ID it reserved as a notice, which is how `cvedex` reads them:
+`cvedex reserve` runs the first one. It prints each ID it reserved as a notice, which `cvedex` reads in the run's log:
 
 ```yaml title=".github/workflows/cvedex-reserve.yml"
 name: cvedex-reserve
@@ -156,6 +156,8 @@ Logged in to https://github.com/acme/cves as alice (acme, admin).
 
 `cvedex` uses `GH_TOKEN` or `GITHUB_TOKEN`, else the [GitHub CLI](https://cli.github.com)'s login, from `gh auth login`. It saves the URL and your GitHub name, and no token.
 
+In the [macOS app](macos.md), pick **GitHub repository** as the server and type the repository, such as `acme/cves`.
+
 ```console
 $ cvedex status
 Server     ● https://github.com/acme/cves  cvedexd on GitHub
@@ -225,6 +227,8 @@ Approved CVE-2026-1102
 
 You can also review the pull request on GitHub. `cvedex` shows the same state.
 
+In the [macOS app](macos.md), an ID that waits for a review has **Approve** and **Request Changes** above its record.
+
 ## See what happened
 
 ```console
@@ -246,8 +250,7 @@ A fine-grained token needs these permissions on the repository:
 | --- | --- | --- |
 | Contents | Read and write | Branches and records |
 | Pull requests | Read and write | Sending records for review |
-| Actions | Read and write | Starting the reserve workflow |
-| Checks | Read | Reading the IDs it reserved |
+| Actions | Read and write | Starting the reserve workflow, and reading the IDs it reserved |
 
 !!! info "No MCP server"
     The [MCP server](agents.md) is part of `cvedexd`. Against a repository, the agent runs the `cvedex` commands, with `--json`.

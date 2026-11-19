@@ -59,7 +59,7 @@ Records pass through as `json.RawMessage`, and the client only reads the few fie
 
 ### Config
 
-`~/.config/cvedex/config.json` written by `cvedex login`, with the API key in the OS keychain through `zalando/go-keyring` (stored under service `cvedex`, account `<user> on <url>`), or in the `0600` file when there is no keychain. Overridden by `CVE_API_URL`, `CVE_API_ORG`, `CVE_API_USER`, `CVE_API_KEY`. These are the names `cvelib` uses, so existing CNA setups work with no changes.
+`~/.config/cvedex/config.json` written by `cvedex login`: the account in use at the top level, as it always was, and the other accounts under `others`. `login` adds an account, a username on a server, and uses it; `accounts switch` uses another; `logout` forgets the one in use and falls back to the next. Each account has its API key in the OS keychain through `zalando/go-keyring` (stored under service `cvedex`, account `<user> on <url>`), or in the `0600` file when there is no keychain. Overridden by `CVE_API_URL`, `CVE_API_ORG`, `CVE_API_USER`, `CVE_API_KEY`. These are the names `cvelib` uses, so existing CNA setups work with no changes.
 
 ### CLI
 
@@ -67,7 +67,8 @@ Covers the CVE Services surface a CNA uses day to day:
 
 ```
 cvedex login [--test]                         prompts in a terminal; --org --user and the key on stdin otherwise
-cvedex logout                                 deletes the config and the keychain entry
+cvedex logout                                 forgets the account in use and its keychain entry
+cvedex accounts | accounts switch <#>         the accounts you are logged in to, and which is in use
 cvedex status                                 server, user, CNA (alias: ping, whoami)
 cvedex reserve [--year 2026] [-n 1] [--sequential]
 cvedex list [--state s] [--year y] [--reserved-after/-before t] [--modified-after/-before t]
@@ -118,7 +119,9 @@ A SwiftUI app in `macos/`, a Swift package for macOS 15 and later. It runs the `
 
 `CvedexMac` is the views: a sidebar of IDs by state with search, the record as a document, and an editor with two views of one container, a grouped form and a plain-text JSON view with no smart quotes. Sheets cover login, reject, and the update review. `macos/build.sh` assembles `cvedex.app` with a universal `cvedex`, signed ad hoc.
 
-Not yet: notarization and a release asset, cvedexd's review, proposals and audit tabs, and a form editor.
+On cvedexd or a GitHub repository, the `Store` also loads the records in review. An ID that has one shows it in place of what `cvedex show` gave, so what the reviewer reads is what approving sends, with Approve, behind a diff against the published record, and Request Changes.
+
+Not yet: notarization and a release asset, cvedexd's proposals and audit tabs, and a form editor.
 
 ## cvedexd (server)
 
@@ -197,11 +200,11 @@ A CNA whose people are on GitHub can skip `cvedexd`: `cvedex login --url https:/
 | Service key | Secrets of the `cve` environment, limited to the default branch |
 | CNA users | Whoever the branch rule and `CODEOWNERS` let merge. `cvedex` enforces nothing itself. |
 
-Two workflows in the repository hold the key, both documented in `docs/github.md`. `cvedex-reserve.yml` is dispatched with `return_run_details` and prints one `::notice title=cvedex::<ID>` per ID, which the client reads from the run's check-run annotations: the REST API exposes no job outputs. `cvedex-publish.yml` runs on pushes to the default branch that touch `records/`, and publishes or updates each changed record depending on whether `cvedex show` finds one.
+Two workflows in the repository hold the key, both documented in `docs/github.md`. `cvedex-reserve.yml` is dispatched with `return_run_details` and prints one `::notice title=cvedex::<ID>` per ID, which the client reads as `##[notice]<ID>` lines in the job's log: the REST API exposes no job outputs, and reading check-run annotations takes a permission fine-grained tokens do not have. `cvedex-publish.yml` runs on pushes to the default branch that touch `records/`, and publishes or updates each changed record depending on whether `cvedex show` finds one.
 
 Handlers share a `repo` whose first failure makes later calls no-ops, so each reads straight through. GitHub's 401, 403 and 404 pass through; anything else is a 502, never a 429, which the client would answer by repeating a reservation.
 
-Not done: `reject`, `unreject`, `adp` and `org` (use CVE Services directly), proposals and submitters (GitHub's permissions replace them), time filters on `list`, the revision before in `review show`, pagination past 100 pull requests, GitHub Enterprise Server, an MCP server, and a login form in the macOS app.
+Not done: `reject`, `unreject`, `adp` and `org` (use CVE Services directly), proposals and submitters (GitHub's permissions replace them), time filters on `list`, the revision before in `review show`, pagination past 100 pull requests, GitHub Enterprise Server, and an MCP server. The macOS app logs in to a repository from its form, and works on its IDs and records through `cvedex` like any other server.
 
 ## Dependencies
 

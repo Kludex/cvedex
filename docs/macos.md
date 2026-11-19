@@ -23,7 +23,8 @@ open macos/build/cvedex.app
 | An ID | Read its record: description, affected versions, severity, weaknesses, references and credits |
 | **Write Record** or **Edit Record** | Build the record in a form, or edit it as JSON, then publish or update it |
 | **More** > **Reject** | Reject the ID, with a reason |
-| The foot of the sidebar | See who you are logged in as and where, switch account, log out |
+| **Approve** or **Request Changes** on an ID | Review a record someone sent, on [cvedexd](cvedexd/review.md) or a [GitHub repository](github.md) |
+| The foot of the sidebar | See who you are logged in as and where, pick another of your accounts, add one, log out |
 
 Every write asks first. The dialog names the ID and says it will be public. **Update** also shows what changes in the published record, line by line, and stays off when nothing does.
 

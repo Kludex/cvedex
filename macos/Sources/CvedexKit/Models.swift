@@ -23,6 +23,14 @@ public struct Status: Decodable, Equatable, Sendable {
     }
 }
 
+/// An account `cvedex` is logged in to, as `cvedex accounts` prints it.
+public struct Account: Decodable, Equatable, Sendable {
+    public let url: String
+    public let user: String
+    /// Whether it is the one in use.
+    public let active: Bool
+}
+
 /// A CVE ID as `cvedex list` prints it.
 public struct CVEID: Decodable, Equatable, Hashable, Identifiable, Sendable {
     public let cveId: String
@@ -35,6 +43,42 @@ public struct CVEID: Decodable, Equatable, Hashable, Identifiable, Sendable {
     /// What cvedexd knows of an ID a submitter reserved through it.
     public struct Local: Decodable, Equatable, Hashable, Sendable {
         public let note: String?
+    }
+}
+
+/// A record sent for review on cvedexd or a GitHub repository, as `cvedex review` prints it.
+public struct Review: Decodable, Equatable, Sendable {
+    public let cveId: String
+    public let submitter: String
+    /// `publish`, for a new or updated record, or `reject`.
+    public let action: String
+    /// What approving names, so a record that changed since you read it is never approved by mistake.
+    public let revision: Int
+    public let record: Record
+    /// What the record changes in the published one. Empty for a first record.
+    public let changes: [DiffLine]
+
+    private enum Keys: String, CodingKey { case cveId, submitter, action, revision, record, published }
+
+    public init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: Keys.self)
+        cveId = try fields.decode(String.self, forKey: .cveId)
+        submitter = try fields.decode(String.self, forKey: .submitter)
+        action = try fields.decode(String.self, forKey: .action)
+        revision = try fields.decode(Int.self, forKey: .revision)
+        record = try fields.decode(Record.self, forKey: .record)
+        let sent = Self.container(try fields.decode(JSONValue.self, forKey: .record))
+        let published = Self.container(try fields.decodeIfPresent(JSONValue.self, forKey: .published))
+        if let sent, let published {
+            changes = DiffLine.lines(from: published, to: sent)
+        } else {
+            changes = []
+        }
+    }
+
+    /// The CNA container of a record as cvedexd keeps it, `{"cnaContainer": ...}`, as text.
+    private static func container(_ record: JSONValue?) -> String? {
+        record?.object?["cnaContainer"]?.object.map { Container(fields: $0).text }
     }
 }
 

@@ -102,13 +102,61 @@ let published = """
     }
 
     @Test func refreshLoggedOutOrEmpty() async throws {
-        let fake = try Fake([ok(loggedOut), ok(#"{"url":"u","server":"cvedexd","submitter":"bob"}"#), ok("null")])
+        let forbidden = #"{"error":"NOT_ALLOWED","message":"Submitters can only reserve IDs and submit records"}"#
+        let fake = try Fake([
+            ok(loggedOut), ok(#"{"url":"u","server":"cvedexd","submitter":"bob"}"#), ok("null"), fail(forbidden),
+        ])
         let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
         await store.refresh()
         #expect(store.status?.loggedIn == false && store.ids.isEmpty)
         await store.refresh()
-        #expect(store.status?.loggedIn == true && store.ids.isEmpty)
-        #expect(fake.calls == ["status --json", "status --json", "list --json"])
+        #expect(store.status?.loggedIn == true && store.ids.isEmpty && store.reviews.isEmpty)
+        #expect(store.error == nil)
+        #expect(fake.calls == ["status --json", "status --json", "list --json", "review --json"])
+    }
+
+    @Test func review() async throws {
+        let reviewer = #"{"url":"https://github.com/acme/cves","server":"cvedexd","user":{"username":"alice"}}"#
+        let waiting = """
+            [{"cve_id":"CVE-2026-1100","submitter":"bob","action":"publish","revision":2,"updated_at":"2026-10-22T10:00:00Z",
+              "record":{"cnaContainer":{"title":"widget: Path traversal"}},"previous":null,"published":null},
+             {"cve_id":"CVE-2026-1099","submitter":"bob","action":"publish","revision":3,
+              "record":{"cnaContainer":{"title":"widget: Path traversal in the file server"}},
+              "published":{"cnaContainer":{"title":"widget: Path traversal"}}}]
+            """
+        let stale = #"{"error":"STALE_REVISION","message":"CVE-2026-1100 changed since revision 2"}"#
+        let fake = try Fake([
+            ok(reviewer), ok(reserved), ok(waiting),
+            ok("{}"), ok(reviewer), ok(reserved), ok("[]"),
+            fail(stale), ok(reviewer), ok(reserved), ok(waiting),
+            ok("{}"), ok(reviewer), ok(reserved), ok("[]"),
+        ])
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
+        await store.refresh()
+        let first = try #require(store.reviews.first)
+        #expect(first.cveId == "CVE-2026-1100" && first.submitter == "bob" && first.action == "publish")
+        #expect(first.revision == 2 && first.record.title == "widget: Path traversal" && first.changes.isEmpty)
+        #expect(
+            store.reviews.last?.changes == [
+                .same("{"), .removed(#"  "title" : "widget: Path traversal""#),
+                .added(#"  "title" : "widget: Path traversal in the file server""#), .same("}"), .same(""),
+            ])
+
+        try await store.approve(first)
+        #expect(store.reviews.isEmpty)
+        await #expect(throws: CLIError(code: "STALE_REVISION", message: "CVE-2026-1100 changed since revision 2")) {
+            try await store.approve(first)
+        }
+        #expect(store.reviews.count == 2)
+        try await store.requestChanges(first, note: "Add the CWE.")
+        #expect(store.reviews.isEmpty)
+        let commands = fake.calls.filter { $0.hasPrefix("review ") }
+        #expect(
+            commands == [
+                "review --json", "review approve CVE-2026-1100 --revision 2 --json", "review --json",
+                "review approve CVE-2026-1100 --revision 2 --json", "review --json",
+                "review request-changes CVE-2026-1100 Add the CWE. --revision 2 --json", "review --json",
+            ])
     }
 
     @Test func refreshFails() async throws {
@@ -133,6 +181,26 @@ let published = """
             fake.calls == [
                 "login --url https://cveawg-test.mitre.org --org acme --user alice@acme.test --json",
                 "status --json", "list --json", "logout --json", "status --json",
+            ])
+    }
+
+    @Test func accounts() async throws {
+        let two = """
+            [{"url":"https://cveawg.mitre.org","org":"acme","user":"alice@acme.test","active":false},
+             {"url":"https://github.com/acme/cves","org":"acme","user":"alice","active":true}]
+            """
+        let fake = try Fake([ok(two), ok(""), ok(alice), ok(reserved), fail("no config")])
+        let store = Store(cli: CLI(executable: fake.executable), defaults: fresh())
+        await store.loadAccounts()
+        #expect(store.accounts.map(\.user) == ["alice@acme.test", "alice"])
+        #expect(store.accounts.map(\.active) == [false, true])
+        try await store.use(account: 1)
+        #expect(store.status?.user?.username == "alice@acme.test")
+        await store.loadAccounts()
+        #expect(store.accounts.isEmpty)
+        #expect(
+            fake.calls == [
+                "accounts --json", "accounts switch 1 --json", "status --json", "list --json", "accounts --json",
             ])
     }
 

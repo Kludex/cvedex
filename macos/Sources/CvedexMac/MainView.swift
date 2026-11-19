@@ -55,8 +55,11 @@ struct Sidebar: View {
                 if !ids.isEmpty {
                     Section(name) {
                         ForEach(ids) { id in
-                            IDRow(id: id, title: store.title(id.cveId), draft: store.drafts.contains(id.id))
-                                .task(id: store.titles[id.cveId] == nil) { await store.loadTitle(id) }
+                            IDRow(
+                                id: id, title: store.title(id.cveId), draft: store.drafts.contains(id.id),
+                                review: store.reviews.contains { $0.cveId == id.cveId }
+                            )
+                            .task(id: store.titles[id.cveId] == nil) { await store.loadTitle(id) }
                         }
                     }
                 }
@@ -132,6 +135,8 @@ private struct IDRow: View {
     let id: CVEID
     let title: String?
     let draft: Bool
+    /// Whether its record waits for a review you can give.
+    let review: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -143,6 +148,9 @@ private struct IDRow: View {
                 Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
             Spacer()
+            if review {
+                Image(systemName: "checkmark.seal").foregroundStyle(.purple).help("Waiting for review")
+            }
             if draft {
                 Image(systemName: "pencil.line").foregroundStyle(.secondary).help("Unsent draft")
             }
@@ -161,7 +169,7 @@ private struct IDRow: View {
 /// Who you are and where, at the foot of the sidebar.
 private struct AccountBar: View {
     @Environment(Store.self) private var store
-    @State private var switching = false
+    @State private var adding = false
 
     var body: some View {
         if let status = store.status {
@@ -171,11 +179,12 @@ private struct AccountBar: View {
                     .frame(width: 8, height: 8)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(status.user?.username ?? status.submitter ?? "").font(.callout).lineLimit(1)
-                    Text(server(status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(serverName(status.url)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 Menu {
-                    Button("Switch Account…") { switching = true }
+                    AccountPicker()
+                    Button("Add Account…") { adding = true }
                     Button("Log Out") { Task { try? await store.logout() } }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -187,17 +196,43 @@ private struct AccountBar: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .overlay(alignment: .top) { Divider() }
-            .sheet(isPresented: $switching) {
-                LoginForm(cancel: { switching = false }, done: { switching = false })
+            .sheet(isPresented: $adding) {
+                LoginForm(cancel: { adding = false }, done: { adding = false })
                     .padding()
                     .frame(width: 480)
             }
         }
     }
+}
 
-    private func server(_ status: Status) -> String {
-        if status.isProduction { return "MITRE production" }
-        if status.url == "https://cveawg-test.mitre.org" { return "MITRE test instance" }
-        return URL(string: status.url)?.host() ?? status.url
+/// The accounts you are logged in to, with the one in use checked. Picking another uses it.
+struct AccountPicker: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        Picker("Accounts", selection: inUse) {
+            ForEach(Array(store.accounts.enumerated()), id: \.offset) { n, account in
+                Text("\(account.user) · \(serverName(account.url))").tag(n + 1)
+            }
+        }
+        .pickerStyle(.inline)
+    }
+
+    /// The number `cvedex accounts` gives the account in use, or 0 for none.
+    private var inUse: Binding<Int> {
+        Binding(
+            get: { (store.accounts.firstIndex(where: \.active) ?? -1) + 1 },
+            set: { number in Task { try? await store.use(account: number) } })
+    }
+}
+
+/// A server as people call it: MITRE's by name, a GitHub repository by its own, any other by its host.
+private func serverName(_ url: String) -> String {
+    switch url {
+    case "https://cveawg.mitre.org": return "MITRE production"
+    case "https://cveawg-test.mitre.org": return "MITRE test instance"
+    default:
+        guard let parsed = URL(string: url) else { return url }
+        return parsed.host() == "github.com" ? String(parsed.path().dropFirst()) : parsed.host() ?? url
     }
 }

@@ -86,6 +86,10 @@ cvedex tui
 
 The Review tab lists the same records. Press ++enter++ to read one, with what changed, and ++a++ to approve the revision you read.
 
+## In the macOS app
+
+An ID that waits for a review shows it above its record, with **Approve** and **Request Changes**. Approving first shows what changes in the published record.
+
 ## Get notified
 
 Set `WEBHOOK_URL` and `cvedexd` posts a line there when a record is sent for review, approved or sent back, and when an agent proposes a write. See [Deploy](deploy.md#settings).

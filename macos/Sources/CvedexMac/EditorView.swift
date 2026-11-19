@@ -230,16 +230,7 @@ private struct UpdateReview: View {
             )
             .foregroundStyle(.secondary)
             if !changes.isEmpty {
-                ScrollView([.vertical, .horizontal]) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(changes.indices, id: \.self) { row($0) }
-                    }
-                    .font(.callout.monospaced())
-                    .textSelection(.enabled)
-                    .padding(.vertical, 6)
-                }
-                .background(.background.secondary, in: .rect(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+                DiffList(changes: changes)
             }
             HStack {
                 Spacer()
@@ -251,24 +242,6 @@ private struct UpdateReview: View {
         }
         .padding(20)
         .frame(width: 680, height: changes.isEmpty ? nil : 460)
-    }
-
-    private func row(_ index: Int) -> some View {
-        let (mark, text, color): (String, String, Color?) =
-            switch changes[index] {
-            case .same(let line): (" ", line, nil)
-            case .removed(let line): ("-", line, .red)
-            case .added(let line): ("+", line, .green)
-            case .skipped(let count): ("", count == 1 ? "1 unchanged line" : "\(count) unchanged lines", nil)
-            }
-        return HStack(spacing: 8) {
-            Text(mark).foregroundStyle(color ?? .secondary).frame(width: 10)
-            Text(text).foregroundStyle(mark.isEmpty ? .secondary : .primary).italic(mark.isEmpty)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 1)
-        .background(color?.opacity(0.15) ?? .clear)
     }
 }
 

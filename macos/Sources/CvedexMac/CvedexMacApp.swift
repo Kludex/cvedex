@@ -57,5 +57,6 @@ struct RootView: View {
             }
         }
         .task { await store.refresh() }
+        .task(id: store.status) { await store.loadAccounts() }
     }
 }

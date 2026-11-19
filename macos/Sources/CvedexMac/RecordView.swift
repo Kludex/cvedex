@@ -30,7 +30,7 @@ struct RecordView: View {
             }
         }
         .navigationTitle(id.cveId)
-        .navigationSubtitle(record?.title ?? "")
+        .navigationSubtitle(shown?.title ?? "")
         .task { await load() }
         .sheet(isPresented: $rejecting) { RejectView(id: id.cveId) }
         .sheet(isPresented: $importing) {
@@ -48,10 +48,19 @@ struct RecordView: View {
         }
     }
 
+    /// The review this ID waits for, if it does and you may review.
+    private var review: Review? { store.reviews.first { $0.cveId == id.cveId } }
+
+    /// The record to read: the one in review, exactly as approving sends it, else the one `cvedex show` gave.
+    private var shown: Record? { review?.record ?? record }
+
     private var document: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+                if let review {
+                    ReviewCallout(review: review) { Task { await load() } }
+                }
                 if let note = id.cvedexd?.note {
                     Callout(symbol: "exclamationmark.bubble", color: .orange, title: "Changes requested") {
                         Text(note).textSelection(.enabled)
@@ -67,8 +76,8 @@ struct RecordView: View {
                 }
                 if let failure {
                     Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                } else if let record {
-                    RecordBody(record: record)
+                } else if let shown {
+                    RecordBody(record: shown)
                 }
             }
             .padding(32)
@@ -77,7 +86,7 @@ struct RecordView: View {
         }
         // Centered in the whole pane, not the document column, which is off-center in a wide window.
         .overlay {
-            if failure == nil && record == nil {
+            if failure == nil && shown == nil {
                 if !loaded {
                     ProgressView()
                 } else if !store.drafts.contains(id.cveId) && id.state == "RESERVED" {
@@ -122,14 +131,16 @@ struct RecordView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(id.cveId).font(.largeTitle.weight(.semibold)).monospacedDigit().textSelection(.enabled)
-                Badge(text: (record?.state ?? id.state).capitalized, color: Style.color(record?.state ?? id.state))
-                if let score = record?.scores.first {
+                Badge(
+                    text: review == nil ? (record?.state ?? id.state).capitalized : "In Review",
+                    color: Style.color(record?.state ?? id.state))
+                if let score = shown?.scores.first {
                     Badge(
                         text: "\(Style.score(score.score)) \(score.severity.capitalized)",
                         color: Style.severity(score.severity))
                 }
             }
-            if let title = record?.title {
+            if let title = shown?.title {
                 Text(title).font(.title2).textSelection(.enabled)
             }
             Text(dates).foregroundStyle(.secondary)

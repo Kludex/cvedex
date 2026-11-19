@@ -6,6 +6,11 @@ import Observation
 public final class Store {
     public private(set) var status: Status?
     public private(set) var ids: [CVEID] = []
+    /// The records waiting for a review, on cvedexd or a GitHub repository. Empty anywhere else, and for
+    /// whoever may not review.
+    public private(set) var reviews: [Review] = []
+    /// The accounts you are logged in to, in the order `cvedex accounts` numbers them from 1.
+    public private(set) var accounts: [Account] = []
     public private(set) var loading = false
     /// The last failure to load, shown over the list.
     public var error: CLIError?
@@ -37,10 +42,17 @@ public final class Store {
             let status = try decoder.decode(Status.self, from: await cli.run(["status"]))
             self.status = status
             ids = status.loggedIn ? try decoder.decode([CVEID]?.self, from: await cli.run(["list"])) ?? [] : []
+            let reviewable = status.loggedIn && status.server == "cvedexd"
+            reviews = reviewable ? (try? decoder.decode([Review].self, from: await cli.run(["review"]))) ?? [] : []
             error = nil
         } catch {
             self.error = Self.cliError(error)
         }
+    }
+
+    /// Loads the accounts you are logged in to. A failure leaves none to pick from.
+    public func loadAccounts() async {
+        accounts = (try? decoder.decode([Account].self, from: await cli.run(["accounts"]))) ?? []
     }
 
     /// Saves credentials after CVE Services accepts them. The key goes to the keychain.
@@ -49,8 +61,15 @@ public final class Store {
         await refresh()
     }
 
+    /// Forgets the account in use. Another one, if there is any, is then in use.
     public func logout() async throws {
         _ = try await cli.run(["logout"])
+        await refresh()
+    }
+
+    /// Puts another account in use, by its number in `accounts`.
+    public func use(account number: Int) async throws {
+        _ = try await cli.run(["accounts", "switch", "\(number)"])
         await refresh()
     }
 
@@ -137,6 +156,30 @@ public final class Store {
             return "Sent \(id) for review"
         }
         return "\(publish ? "Published" : "Updated") \(id)"
+    }
+
+    /// Publishes a record in review, or rejects its ID, at the revision you read.
+    public func approve(_ review: Review) async throws {
+        titles[review.cveId] = nil
+        try await decide(["review", "approve", review.cveId, "--revision", "\(review.revision)"])
+    }
+
+    /// Sends a record in review back to its submitter with a note.
+    public func requestChanges(_ review: Review, note: String) async throws {
+        try await decide(["review", "request-changes", review.cveId, note, "--revision", "\(review.revision)"])
+    }
+
+    /// Runs a review command, then reloads either way: one that fails on a record that changed meanwhile leaves
+    /// the new revision to read.
+    private func decide(_ arguments: [String]) async throws {
+        let outcome: Result<Data, any Error>
+        do {
+            outcome = .success(try await cli.run(arguments))
+        } catch {
+            outcome = .failure(error)
+        }
+        await refresh()
+        _ = try outcome.get()
     }
 
     public func reject(_ id: String, reason: String) async throws {

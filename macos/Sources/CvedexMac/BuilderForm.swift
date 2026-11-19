@@ -20,7 +20,7 @@ struct BuilderForm: View {
                     .scrollContentBackground(.hidden)
                     .issue(problems, container.summaryPath)
             } header: {
-                Header("Description", hint: "What an attacker can do, how, and which version fixes it. Markdown works.")
+                Header("Description", hint: "What an attacker can do, how, and which version fixes it, in plain text.")
             }
 
             ForEach(container.products.indices, id: \.self) { i in

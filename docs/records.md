@@ -65,12 +65,14 @@ cvedex record from-advisory https://github.com/acme/widget/security/advisories/G
 | Advisory | Record |
 | --- | --- |
 | Summary | `title`, after the project: "widget: Path traversal in the file server" |
-| Description | `descriptions` |
+| Description | `descriptions`: the Markdown as plain text in `value`, and as HTML in a `text/html` `supportingMedia` entry |
 | Each package and its vulnerable range | An `affected` entry: owner as vendor, package as product, the range as `version` and `lessThan` |
 | CWEs | `problemTypes` |
 | CVSS 3.x and 4.0 | `metrics`, with the severity |
 | Credits | `credits`, by GitHub login |
 | The advisory and the links in its description | `references` |
+
+cve.org and most tools only show `value`, so it reads without Markdown: headings and links become text, a link keeps its address in parentheses, and code blocks are indented. Raw HTML in the advisory is left out of both.
 
 Published advisories need no token. A draft does, because GitHub only shows it to the repository's maintainers. `cvedex` uses the [GitHub CLI](https://cli.github.com)'s login when you have one, so this is enough:
 

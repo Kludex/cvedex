@@ -34,7 +34,8 @@ func reserve(g *repo, r *http.Request) any {
 	}, &dispatched)
 	done := g.finish("reserve", func() run {
 		var r run
-		g.call(http.MethodGet, g.path("/actions/runs/%d", dispatched.ID), nil, &r)
+		// 404 is a run GitHub has started and does not show yet.
+		g.call(http.MethodGet, g.path("/actions/runs/%d", dispatched.ID), nil, &r, http.StatusNotFound)
 		return r
 	})
 	var jobs struct {

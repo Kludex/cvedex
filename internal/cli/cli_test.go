@@ -1576,7 +1576,7 @@ func TestRepository(t *testing.T) {
 		},
 		{
 			name: "reserve",
-			exchanges: []cassette.Exchange{info, dispatch, running, ran("success"), jobs,
+			exchanges: []cassette.Exchange{info, dispatch, missing("/actions/runs/7"), running, ran("success"), jobs,
 				missing("/actions/jobs/70/logs"), get("/actions/jobs/70/logs", log("CVE-2026-1200", "CVE-2026-1201")),
 				branch("CVE-2026-1200", "abc", 201), branch("CVE-2026-1201", "abc", 422)},
 			args:   reserve,

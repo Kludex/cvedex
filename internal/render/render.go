@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"image/color"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -80,11 +81,19 @@ func trimLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// Day is a date as the tables show it, and nothing for a time nobody knows.
+func Day(at time.Time) string {
+	if at.IsZero() {
+		return ""
+	}
+	return at.Format(time.DateOnly)
+}
+
 // IDs renders CVE IDs as a table.
 func IDs(ids []cveservices.CVEID) string {
 	rows := make([][]string, len(ids))
 	for i, id := range ids {
-		rows[i] = []string{id.ID, id.State, id.Reserved.Format("2006-01-02"), id.RequestedBy.User}
+		rows[i] = []string{id.ID, id.State, Day(id.Reserved), id.RequestedBy.User}
 		if id.Cvedexd != nil {
 			rows[i][1] += " (" + id.Cvedexd.Label() + ")"
 		}

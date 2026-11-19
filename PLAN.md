@@ -49,6 +49,7 @@ internal/
   tui/                bubbletea
   render/             lipgloss tables and the record summary
   record/             the CVE JSON 5 schema check, and records built from GitHub advisories
+  github/             the cvedexd API served from a GitHub repository, see "GitHub repository" below
   config/             ~/.config/cvedex/config.json, the key in the OS keychain, and env overrides
   cassette/           test server replaying testdata/recorded/
 macos/                the SwiftUI app, see "macOS app" below
@@ -180,6 +181,28 @@ A `hono` middleware, one insert-only table: `ts, actor, actor_kind (cna_user|sub
 
 `submitters`, `tokens`, `cves`, `revisions`, `proposals`, `audit`. Schema changes are numbered files in `server/migrations/`, applied with `wrangler d1 migrations apply`.
 
+## GitHub repository
+
+A CNA whose people are on GitHub can skip `cvedexd`: `cvedex login --url https://github.com/owner/repo` points the client at a private repository. `internal/github` is an `http.RoundTripper` that answers the `cvedexd` API in-process from GitHub's REST API, so the CLI, the TUI and `--json` are unchanged, and `status` reports `cvedexd on GitHub`. The token is `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`, never saved, and the CVE Services key is never read for a repository URL.
+
+| `cvedexd` | Repository |
+| --- | --- |
+| Reserved ID | Branch `cve/<ID>`, created at the commit the reserve workflow ran on |
+| Record in review | Open pull request from that branch adding `records/<ID>.json`, the CNA container indented |
+| Revision | The pull request's commit count. Approve merges with `sha`, so a push meanwhile is a `409` |
+| Changes requested | A `CHANGES_REQUESTED` review on the head commit, its body the note |
+| Approve | An `APPROVE` review, a squash merge, the branch deleted, then a wait for the publish run |
+| Published | `records/<ID>.json` on the default branch |
+| Audit | The repository's workflow runs, 100 a page |
+| Service key | Secrets of the `cve` environment, limited to the default branch |
+| CNA users | Whoever the branch rule and `CODEOWNERS` let merge. `cvedex` enforces nothing itself. |
+
+Two workflows in the repository hold the key, both documented in `docs/github.md`. `cvedex-reserve.yml` is dispatched with `return_run_details` and prints one `::notice title=cvedex::<ID>` per ID, which the client reads from the run's check-run annotations: the REST API exposes no job outputs. `cvedex-publish.yml` runs on pushes to the default branch that touch `records/`, and publishes or updates each changed record depending on whether `cvedex show` finds one.
+
+Handlers share a `repo` whose first failure makes later calls no-ops, so each reads straight through. GitHub's 401, 403 and 404 pass through; anything else is a 502, never a 429, which the client would answer by repeating a reservation.
+
+Not done: `reject`, `unreject`, `adp` and `org` (use CVE Services directly), proposals and submitters (GitHub's permissions replace them), time filters on `list`, the revision before in `review show`, pagination past 100 pull requests, GitHub Enterprise Server, an MCP server, and a login form in the macOS app.
+
 ## Dependencies
 
 - `cvedex`: `net/http` with redirects disabled, so the key never follows a redirect. `cobra` for commands, Charm's `bubbletea`, `bubbles`, `lipgloss` and `huh` for the TUI, output and prompts, `zalando/go-keyring` for the key and `santhosh-tekuri/jsonschema` for the schema check (both pure Go, so static builds keep working).
@@ -209,7 +232,7 @@ Later, if people ask: a Homebrew tap and a `.deb`. Not before.
 
 ## Testing
 
-- `cvedex` tests drive the CLI and TUI model through their public entry points against `internal/cassette`, an `httptest` server that replays the recorded exchanges in order and fails on any other request. `cvedexd` endpoints have no recordings yet, so those tests use inline exchanges in the server's response shapes.
+- `cvedex` tests drive the CLI and TUI model through their public entry points against `internal/cassette`, an `httptest` server that replays the recorded exchanges in order and fails on any other request. `cvedexd` endpoints have no recordings yet, so those tests use inline exchanges in the server's response shapes. Neither has GitHub's API for a repository: those exchanges are written after the examples in GitHub's OpenAPI description.
 - `cvedexd` tests run under `@cloudflare/vitest-plugin` (the renamed `vitest-pool-workers`) against a real D1 binding, with upstream calls answered from fixtures by a stubbed `fetch`. 100% coverage is enforced.
 - Cassettes live in `testdata/recorded/`, shared by both test suites, and come from `scripts/record-fixtures.mjs`. Each holds the request and the response's status, rate-limit and content headers, and raw body. Without credentials it records the public and error responses; with a test-instance CNA account it records the authenticated reads, with `--writes` also a reservation and a publish, and with `--lifecycle` the ID state changes, both rejects and a user update. `--only=a,b` rewrites just those cassettes. Tests only replay; CI never calls the test instance.
 - CI runs `go test -race` on Linux, macOS and Windows, and enforces 100% coverage of `cveservices/` and `internal/` on Linux. It also lints the macOS app with `swift format`, enforces 100% line coverage of `CvedexKit`, and builds the bundle. The prompts and `cvedex tui` are tested in a pseudo-terminal, which Windows skips.

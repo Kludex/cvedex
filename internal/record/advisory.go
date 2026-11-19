@@ -6,12 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	neturl "net/url"
-	"os"
-	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/Kludex/cvedex/internal/github"
 )
 
 // AdvisoryHint is the start of a GitHub repository advisory URL, for help and error messages.
@@ -29,12 +28,8 @@ func FromAdvisory(ctx context.Context, url string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("%s is not a GitHub repository advisory, such as %s", url, AdvisoryHint)
 	}
 	owner, repo, ghsa := parts[1], parts[2], parts[3]
-	api := cmp.Or(os.Getenv("GITHUB_API_URL"), "https://api.github.com")
-	token := cmp.Or(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN"))
-	if token == "" {
-		token = ghToken(ctx, api)
-	}
-	path := fmt.Sprintf("%s/repos/%s/%s/security-advisories/%s", strings.TrimSuffix(api, "/"), owner, repo, ghsa)
+	token := github.Token(ctx)
+	path := fmt.Sprintf("%s/repos/%s/%s/security-advisories/%s", github.API(), owner, repo, ghsa)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -172,20 +167,6 @@ var registries = map[string][2]string{
 	"rubygems": {"custom", "https://rubygems.org"},
 	"nuget":    {"custom", "https://www.nuget.org"},
 	"composer": {"custom", "https://packagist.org"},
-}
-
-// ghToken is the GitHub CLI's token for the API's host, or empty when gh is missing or logged out.
-// The host drops "api.", so api.github.com is github.com.
-func ghToken(ctx context.Context, api string) string {
-	u, err := neturl.Parse(api)
-	if err != nil {
-		return ""
-	}
-	out, err := exec.CommandContext(ctx, "gh", "auth", "token", "--hostname", strings.TrimPrefix(u.Host, "api.")).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }
 
 var link = regexp.MustCompile("https?://[^\\s<>()\\[\\]\"'`]+")

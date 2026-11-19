@@ -3,8 +3,10 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +27,7 @@ import (
 	"github.com/Kludex/cvedex/cveservices"
 	"github.com/Kludex/cvedex/internal/cassette"
 	"github.com/Kludex/cvedex/internal/cli"
+	"github.com/Kludex/cvedex/internal/github"
 )
 
 type result struct {
@@ -907,6 +911,7 @@ func TestCommands(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	keyring.MockInit()
+	github.Interval = time.Millisecond
 	os.Exit(m.Run())
 }
 
@@ -1427,5 +1432,492 @@ func TestTUI(t *testing.T) {
 	term := startTerminal(t, "tui")
 	term.waitFor("CVE-2026-1100")
 	term.send("q")
+	term.exits(0)
+}
+
+const repoURL = "https://github.com/acme/cves"
+
+// runRepo runs cvedex against the acme/cves repository on GitHub, with exchanges as GitHub's API.
+// The exchanges are written after the examples of GitHub's OpenAPI description, not recorded.
+func runRepo(t *testing.T, stdin string, exchanges []cassette.Exchange, args ...string) result {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CVE_API_URL", repoURL)
+	t.Setenv("GITHUB_API_URL", cassette.Serve(t, exchanges...))
+	t.Setenv("GH_TOKEN", "gh-token")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("CVE_API_ORG", "acme")
+	t.Setenv("CVE_API_USER", "alice")
+	t.Setenv("CVE_API_KEY", "cve-services-key")
+	return rerun(stdin, args...)
+}
+
+// contents is a file as GitHub's contents API answers it.
+func contents(text, sha string) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(text))
+	return `{"type":"file","encoding":"base64","sha":"` + sha + `","content":"` + encoded[:len(encoded)/2] + `\n` +
+		encoded[len(encoded)/2:] + `\n"}`
+}
+
+func TestRepository(t *testing.T) {
+	const (
+		repo   = "/repos/acme/cves"
+		record = `{"title":"Path traversal in widget","descriptions":[{"lang":"en","value":"widget before 1.4.2 ` +
+			`serves files outside its root."}],"affected":[{"vendor":"acme","product":"widget","versions":[{"version":"0",` +
+			`"lessThan":"1.4.2","status":"affected","versionType":"semver"}]}],"references":[{"url":"https://acme.test/1"}]}`
+		untitled = `{"descriptions":[{"lang":"en","value":"widget serves files outside its root."}],"affected":` +
+			`[{"vendor":"acme","product":"widget","versions":[{"version":"0","status":"affected"}]}],` +
+			`"references":[{"url":"https://acme.test/1"}]}`
+	)
+	dir := t.TempDir()
+	titled, bare := filepath.Join(dir, "titled.json"), filepath.Join(dir, "bare.json")
+	for path, data := range map[string]string{titled: record, bare: untitled} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	committed := func(text string) string {
+		var indented bytes.Buffer
+		if err := json.Indent(&indented, []byte(text), "", "  "); err != nil {
+			t.Fatal(err)
+		}
+		return base64.StdEncoding.EncodeToString(append(indented.Bytes(), '\n'))
+	}
+	get := func(path, response string) cassette.Exchange {
+		return cassette.Exchange{Method: "GET", Path: repo + path, Response: response}
+	}
+	missing := func(path string) cassette.Exchange {
+		return cassette.Exchange{Method: "GET", Path: repo + path, Status: 404, Response: `{"message":"Not Found"}`}
+	}
+	info := get("", `{"default_branch":"main","permissions":{"admin":true,"push":true,"pull":true}}`)
+	me := cassette.Exchange{Method: "GET", Path: "/user", Response: `{"login":"alice"}`}
+	pull := func(number int, state, id, sha string) string {
+		return fmt.Sprintf(`{"number":%[1]d,"state":%[2]q,"html_url":"https://github.com/acme/cves/pull/%[1]d",`+
+			`"user":{"login":"bob"},"head":{"ref":"cve/%[3]s","sha":%[4]q},"created_at":"2026-10-2%[1]dT10:00:00Z",`+
+			`"updated_at":"2026-10-22T11:00:00Z","commits":2}`, number, state, id, sha)
+	}
+	open := func(id, pulls string) cassette.Exchange {
+		return get("/pulls?per_page=100&state=open&head=acme:cve/"+id, "["+pulls+"]")
+	}
+	const reviews = "/reviews?per_page=100"
+	dispatch := cassette.Exchange{Method: "POST", Path: repo + "/actions/workflows/cvedex-reserve.yml/dispatches",
+		Body:     `{"ref":"main","return_run_details":true,"inputs":{"year":"2026","count":"2","sequential":"true"}}`,
+		Response: `{"workflow_run_id":7,"run_url":"https://api.github.com/repos/acme/cves/actions/runs/7"}`}
+	running := get("/actions/runs/7", `{"id":7,"status":"in_progress","conclusion":null}`)
+	ran := func(conclusion string) cassette.Exchange {
+		return get("/actions/runs/7", `{"id":7,"status":"completed","conclusion":"`+conclusion+`","head_sha":"abc",`+
+			`"html_url":"https://github.com/acme/cves/actions/runs/7"}`)
+	}
+	jobs := get("/actions/runs/7/jobs", `{"total_count":1,"jobs":[{"id":70,"name":"reserve"}]}`)
+	branch := func(id, sha string, status int) cassette.Exchange {
+		return cassette.Exchange{Method: "POST", Path: repo + "/git/refs", Status: status,
+			Body: `{"ref":"refs/heads/cve/` + id + `","sha":"` + sha + `"}`, Response: `{"ref":"refs/heads/cve/` + id + `"}`}
+	}
+	reserve := []string{"reserve", "--year", "2026", "--count", "2", "--sequential"}
+	approve := []string{"review", "approve", "CVE-2026-1101", "--revision", "2"}
+	merge := cassette.Exchange{Method: "PUT", Path: repo + "/pulls/4/merge", Body: `{"sha":"s4","merge_method":"squash"}`,
+		Response: `{"sha":"m1","merged":true,"message":"Pull Request successfully merged"}`}
+	approved := cassette.Exchange{Method: "POST", Path: repo + "/pulls/4/reviews",
+		Body: `{"event":"APPROVE","commit_id":"s4"}`, Response: `{"id":80,"state":"APPROVED"}`}
+	const published = "/actions/workflows/cvedex-publish.yml/runs?head_sha=m1"
+	var hundred []string
+	for i := range 100 {
+		hundred = append(hundred, fmt.Sprintf(`{"run_number":%d,"status":"queued"}`, i))
+	}
+
+	tests := []struct {
+		name      string
+		exchanges []cassette.Exchange
+		args      []string
+		code      int
+		stdout    []string
+		stderr    []string
+	}{
+		{
+			name:      "status",
+			exchanges: []cassette.Exchange{me, info},
+			args:      []string{"status"},
+			stdout:    []string{repoURL, "cvedexd on GitHub", "alice admin"},
+		},
+		{
+			name: "reserve",
+			exchanges: []cassette.Exchange{info, dispatch, running, ran("success"), jobs,
+				get("/check-runs/70/annotations?per_page=100", `[`+
+					`{"annotation_level":"notice","title":"","message":"Runners are busy."},`+
+					`{"annotation_level":"notice","title":"cvedex","message":"CVE-2026-1200"},`+
+					`{"annotation_level":"notice","title":"cvedex","message":"CVE-2026-1201"}]`),
+				branch("CVE-2026-1200", "abc", 201), branch("CVE-2026-1201", "abc", 422)},
+			args:   reserve,
+			stdout: []string{"Reserved 2 CVE IDs", "CVE-2026-1200", "CVE-2026-1201"},
+		},
+		{
+			name:      "reserve when the workflow fails",
+			exchanges: []cassette.Exchange{info, dispatch, ran("failure")},
+			args:      reserve,
+			code:      1,
+			stderr:    []string{"The reserve workflow failed: https://github.com/acme/cves/actions/runs/7 (WORKFLOW_FAILED)"},
+		},
+		{
+			name: "reserve when the workflow reserves nothing",
+			exchanges: []cassette.Exchange{info, dispatch, ran("success"), jobs,
+				get("/check-runs/70/annotations?per_page=100", `[]`)},
+			args:   reserve,
+			code:   1,
+			stderr: []string{"The reserve workflow reserved no ID: https://github.com/acme/cves/actions/runs/7"},
+		},
+		{
+			name:      "reserve when the workflow never ends",
+			exchanges: append([]cassette.Exchange{info, dispatch}, slices.Repeat([]cassette.Exchange{running}, 150)...),
+			args:      reserve,
+			code:      1,
+			stderr:    []string{"The reserve workflow has not finished yet. See https://github.com/acme/cves/actions"},
+		},
+		{
+			name: "list",
+			exchanges: []cassette.Exchange{info,
+				get("/git/trees/main?recursive=1", `{"tree":[{"path":"README.md","type":"blob"},{"path":"records","type":"tree"},`+
+					`{"path":"records/CVE-2026-1100.json","type":"blob"},{"path":"records/notes.txt","type":"blob"}]}`),
+				get("/git/matching-refs/heads/cve/", `[`+
+					`{"ref":"refs/heads/cve/CVE-2026-1100"},{"ref":"refs/heads/cve/CVE-2026-1101"},`+
+					`{"ref":"refs/heads/cve/CVE-2026-1102"},{"ref":"refs/heads/cve/CVE-2026-1103"},{"ref":"refs/heads/cve/draft"}]`),
+				get("/pulls?per_page=100&state=all", "["+pull(5, "open", "CVE-2026-1102", "s5")+","+
+					pull(4, "open", "CVE-2026-1101", "s4")+","+pull(3, "closed", "CVE-2026-1100", "s3")+","+
+					pull(2, "closed", "CVE-2025-0009", "s2")+","+pull(1, "open", "draft", "s1")+"]"),
+				get("/pulls/5"+reviews, `[{"state":"CHANGES_REQUESTED","body":"Add the CWE.","commit_id":"s5"},`+
+					`{"state":"COMMENTED","body":"Thanks.","commit_id":"s5"}]`),
+				get("/pulls/4"+reviews, `[{"state":"CHANGES_REQUESTED","body":"Fixed since.","commit_id":"s0"}]`)},
+			args: []string{"list"},
+			stdout: []string{"CVE-2026-1100   PUBLISHED                      2026-10-23   bob",
+				"CVE-2026-1101   RESERVED (in_review)",
+				"CVE-2026-1102   RESERVED (changes requested)", "CVE-2026-1103   RESERVED (reserved)\n",
+				"CVE-2026-1102: Add the CWE."},
+		},
+		{
+			name: "list one state and year",
+			exchanges: []cassette.Exchange{info,
+				get("/git/trees/main?recursive=1", `{"tree":[{"path":"records/CVE-2026-1100.json"}]}`),
+				get("/git/matching-refs/heads/cve/",
+					`[{"ref":"refs/heads/cve/CVE-2025-0002"},{"ref":"refs/heads/cve/CVE-2026-1103"}]`),
+				get("/pulls?per_page=100&state=all", `[]`)},
+			args:   []string{"list", "--state", "reserved", "--year", "2026", "--json"},
+			stdout: []string{"[\n  {\n    \"cve_id\": \"CVE-2026-1103\",", "\"state\": \"reserved\"\n    }\n  }\n]"},
+		},
+		{
+			name:   "list by time",
+			args:   []string{"list", "--reserved-after", "2026-01-01"},
+			code:   1,
+			stderr: []string{"A GitHub repository cannot filter CVE IDs by time (NOT_SUPPORTED)"},
+		},
+		{
+			name: "show a record in review",
+			exchanges: []cassette.Exchange{open("CVE-2026-1101", pull(4, "open", "CVE-2026-1101", "s4")),
+				get("/contents/records/CVE-2026-1101.json?ref=s4", contents(record, "blob"))},
+			args:   []string{"show", "2026-1101"},
+			stdout: []string{"CVE-2026-1101  IN_REVIEW", "Path traversal in widget", "acme widget"},
+		},
+		{
+			name: "show a published record",
+			exchanges: []cassette.Exchange{open("CVE-2026-1100", ""),
+				get("/contents/records/CVE-2026-1100.json", contents(record, "blob"))},
+			args:   []string{"show", "CVE-2026-1100"},
+			stdout: []string{"CVE-2026-1100  PUBLISHED", "Path traversal in widget"},
+		},
+		{
+			name:      "show an ID without a record",
+			exchanges: []cassette.Exchange{open("CVE-2026-1103", ""), missing("/contents/records/CVE-2026-1103.json")},
+			args:      []string{"show", "CVE-2026-1103"},
+			code:      1,
+			stderr:    []string{"The cve record for the cve id does not exist. (CVE_RECORD_DNE)"},
+		},
+		{
+			name: "show a record that is not JSON",
+			exchanges: []cassette.Exchange{open("CVE-2026-1100", ""),
+				get("/contents/records/CVE-2026-1100.json", contents("<<<<<<< HEAD", "blob"))},
+			args:   []string{"show", "CVE-2026-1100"},
+			code:   1,
+			stderr: []string{"records/CVE-2026-1100.json in the repository is not JSON (BAD_RECORD)"},
+		},
+		{
+			name:   "show what is not a CVE ID",
+			args:   []string{"show", "../../README"},
+			code:   1,
+			stderr: []string{`"../../README" is not a CVE ID (BAD_INPUT)`},
+		},
+		{
+			name: "publish",
+			exchanges: []cassette.Exchange{info,
+				get("/git/ref/heads/cve/CVE-2026-1101", `{"ref":"refs/heads/cve/CVE-2026-1101","object":{"sha":"abc"}}`),
+				missing("/contents/records/CVE-2026-1101.json?ref=cve/CVE-2026-1101"),
+				{Method: "PUT", Path: repo + "/contents/records/CVE-2026-1101.json", Status: 201,
+					Body:     `{"message":"CVE-2026-1101","branch":"cve/CVE-2026-1101","content":"` + committed(untitled) + `"}`,
+					Response: `{"commit":{"sha":"s4"}}`},
+				open("CVE-2026-1101", ""),
+				{Method: "POST", Path: repo + "/pulls", Status: 201, Response: pull(4, "open", "CVE-2026-1101", "s4"),
+					Body: `{"title":"CVE-2026-1101","head":"cve/CVE-2026-1101","base":"main",` +
+						`"body":"Sent with ` + "`cvedex`. Read it with `cvedex review show CVE-2026-1101`" + `."}`}},
+			args:   []string{"publish", "CVE-2026-1101", bare},
+			stdout: []string{"Sent CVE-2026-1101 for review"},
+		},
+		{
+			name: "update",
+			exchanges: []cassette.Exchange{info, missing("/git/ref/heads/cve/CVE-2026-1100"),
+				get("/git/ref/heads/main", `{"ref":"refs/heads/main","object":{"type":"commit","sha":"main-sha"}}`),
+				branch("CVE-2026-1100", "main-sha", 201),
+				get("/contents/records/CVE-2026-1100.json?ref=cve/CVE-2026-1100", contents(untitled, "blob")),
+				{Method: "PUT", Path: repo + "/contents/records/CVE-2026-1100.json", Response: `{"commit":{"sha":"s9"}}`,
+					Body: `{"message":"CVE-2026-1100: Path traversal in widget","branch":"cve/CVE-2026-1100","sha":"blob",` +
+						`"content":"` + committed(record) + `"}`},
+				open("CVE-2026-1100", pull(9, "open", "CVE-2026-1100", "s9"))},
+			args:   []string{"update", "CVE-2026-1100", titled, "--json"},
+			stdout: []string{`"state": "in_review"`, `"url": "https://github.com/acme/cves/pull/9"`},
+		},
+		{
+			name: "review",
+			exchanges: []cassette.Exchange{
+				get("/pulls?per_page=100&state=open", "["+pull(5, "open", "CVE-2026-1102", "s5")+","+
+					pull(4, "open", "CVE-2026-1101", "s4")+","+pull(6, "open", "CVE-2026-1103", "s6")+"]"),
+				get("/contents/records/CVE-2026-1102.json?ref=s5", contents(record, "blob")),
+				get("/pulls/5"+reviews, `[{"state":"CHANGES_REQUESTED","body":"Add the CWE.","commit_id":"s5"}]`),
+				get("/contents/records/CVE-2026-1101.json?ref=s4", contents(record, "blob")),
+				get("/pulls/4"+reviews, `[]`),
+				get("/pulls/4", pull(4, "open", "CVE-2026-1101", "s4")),
+				missing("/contents/records/CVE-2026-1101.json"),
+				missing("/contents/records/CVE-2026-1103.json?ref=s6")},
+			args:   []string{"review"},
+			stdout: []string{"CVE-2026-1101   publish   2     bob         2026-10-22   Path traversal in widget\n"},
+		},
+		{
+			name: "review show an update",
+			exchanges: []cassette.Exchange{get("/pulls?per_page=100&state=open", "["+pull(9, "open", "CVE-2026-1100", "s9")+"]"),
+				get("/contents/records/CVE-2026-1100.json?ref=s9", contents(record, "blob")),
+				get("/pulls/9"+reviews, `[]`),
+				get("/pulls/9", pull(9, "open", "CVE-2026-1100", "s9")),
+				get("/contents/records/CVE-2026-1100.json", contents(untitled, "old"))},
+			args: []string{"review", "show", "CVE-2026-1100"},
+			stdout: []string{"revision 2 from bob, asking to publish", "Changes from the published record",
+				`+    "title": "Path traversal in widget"`, "cvedex review approve CVE-2026-1100 --revision 2"},
+		},
+		{
+			name: "review approve",
+			exchanges: []cassette.Exchange{open("CVE-2026-1101", pull(4, "open", "CVE-2026-1101", "s4")),
+				get("/pulls/4", pull(4, "open", "CVE-2026-1101", "s4")), approved, merge,
+				{Method: "DELETE", Path: repo + "/git/refs/heads/cve/CVE-2026-1101", Status: 204},
+				get(published, `{"total_count":0,"workflow_runs":[]}`),
+				get(published, `{"total_count":1,"workflow_runs":[{"id":8,"status":"completed","conclusion":"success"}]}`)},
+			args:   approve,
+			stdout: []string{"Approved CVE-2026-1101", "CVE-2026-1101  PUBLISHED"},
+		},
+		{
+			name: "review approve your own record, on a repository that deletes merged branches",
+			exchanges: []cassette.Exchange{open("CVE-2026-1101", pull(4, "open", "CVE-2026-1101", "s4")),
+				get("/pulls/4", pull(4, "open", "CVE-2026-1101", "s4")),
+				{Method: "POST", Path: repo + "/pulls/4/reviews", Status: 422,
+					Response: `{"message":"Unprocessable Entity","errors":["Can not approve your own pull request"]}`},
+				merge,
+				{Method: "DELETE", Path: repo + "/git/refs/heads/cve/CVE-2026-1101", Status: 422,
+					Response: `{"message":"Reference does not exist"}`},
+				get(published, `{"workflow_runs":[{"id":8,"status":"completed","conclusion":"failure",`+
+					`"html_url":"https://github.com/acme/cves/actions/runs/8"}]}`)},
+			args:   approve,
+			code:   1,
+			stderr: []string{"The publish workflow failed: https://github.com/acme/cves/actions/runs/8"},
+		},
+		{
+			name: "review approve a record that changed",
+			exchanges: []cassette.Exchange{open("CVE-2026-1101", pull(4, "open", "CVE-2026-1101", "s4")),
+				get("/pulls/4", pull(4, "open", "CVE-2026-1101", "s4"))},
+			args:   []string{"review", "approve", "CVE-2026-1101", "--revision", "1"},
+			code:   1,
+			stderr: []string{"CVE-2026-1101 changed since revision 1 (STALE_REVISION)"},
+		},
+		{
+			name: "review approve a record that changes meanwhile",
+			exchanges: []cassette.Exchange{open("CVE-2026-1101", pull(4, "open", "CVE-2026-1101", "s4")),
+				get("/pulls/4", pull(4, "open", "CVE-2026-1101", "s4")), approved,
+				{Method: "PUT", Path: repo + "/pulls/4/merge", Status: 409,
+					Response: `{"message":"Head branch was modified. Review and try the merge again."}`}},
+			args:   approve,
+			code:   1,
+			stderr: []string{"CVE-2026-1101 changed since revision 2 (STALE_REVISION)"},
+		},
+		{
+			name:      "review approve an ID that is not in review",
+			exchanges: []cassette.Exchange{open("CVE-2026-1101", "")},
+			args:      approve,
+			code:      1,
+			stderr:    []string{"CVE-2026-1101 is not in review (NOT_IN_REVIEW)"},
+		},
+		{
+			name: "review request-changes",
+			exchanges: []cassette.Exchange{open("CVE-2026-1101", pull(4, "open", "CVE-2026-1101", "s4")),
+				get("/pulls/4", pull(4, "open", "CVE-2026-1101", "s4")),
+				{Method: "POST", Path: repo + "/pulls/4/reviews", Response: `{"id":81,"state":"CHANGES_REQUESTED"}`,
+					Body: `{"event":"REQUEST_CHANGES","body":"Add the CWE.","commit_id":"s4"}`}},
+			args:   []string{"review", "request-changes", "CVE-2026-1101", "Add the CWE.", "--revision", "2"},
+			stdout: []string{"Sent CVE-2026-1101 back to its submitter."},
+		},
+		{
+			name: "audit",
+			exchanges: []cassette.Exchange{get("/actions/runs?actor=alice&created=>=2026-10-01&page=1&per_page=100",
+				`{"workflow_runs":[`+
+					`{"run_number":3,"name":"cvedex-publish","display_title":"CVE-2026-1101: Path traversal in widget (#4)",`+
+					`"event":"push","status":"completed","conclusion":"success","created_at":"2026-10-22T11:05:00Z",`+
+					`"actor":{"login":"alice"}},`+
+					`{"run_number":2,"name":"cvedex-publish","display_title":"CVE-2026-1100","event":"push","status":"completed",`+
+					`"conclusion":"failure","created_at":"2026-10-22T11:00:00Z","actor":{"login":"alice"}},`+
+					`{"run_number":1,"name":"cvedex-reserve","display_title":"cvedex-reserve","event":"workflow_dispatch",`+
+					`"status":"in_progress","conclusion":null,"created_at":"2026-10-22T10:00:00Z","actor":{"login":"alice"}}]}`)},
+			args: []string{"audit", "--user", "alice", "--since", "2026-10-01"},
+			stdout: []string{"2026-10-22 11:05:00   alice   push ",
+				"cvedex-publish CVE-2026-1101: Path traversal in widget (#4)   200",
+				"cvedex-publish CVE-2026-1100                                  500",
+				"workflow_dispatch   cvedex-reserve cvedex-reserve                                 ?"},
+		},
+		{
+			name: "audit an older page",
+			exchanges: []cassette.Exchange{get("/actions/runs?page=2&per_page=100",
+				`{"workflow_runs":[`+strings.Join(hundred, ",")+`]}`)},
+			args:   []string{"audit", "--before", "2"},
+			stdout: []string{"Older entries: cvedex audit --before 3"},
+		},
+		{
+			name:   "proposals",
+			args:   []string{"proposals"},
+			code:   1,
+			stderr: []string{"A GitHub repository has no proposals"},
+		},
+		{
+			name:   "what a repository does not do",
+			args:   []string{"org"},
+			code:   1,
+			stderr: []string{"A GitHub repository does not do this: it reserves IDs, and takes records for review"},
+		},
+		{
+			name: "forbidden by GitHub",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: repo, Status: 403,
+				Response: `{"message":"Resource not accessible by personal access token"}`}},
+			args: []string{"list"},
+			code: 1,
+			stderr: []string{"GitHub: Resource not accessible by personal access token (GET /repos/acme/cves) (GITHUB_ERROR)",
+				"Your user is not allowed to do this."},
+		},
+		{
+			name:      "GitHub is down",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/user", Status: 503, Response: "<html>"}},
+			args:      []string{"status"},
+			code:      1,
+			stderr:    []string{"GitHub: 503 Service Unavailable (GET /user) (GITHUB_ERROR)"},
+		},
+		{
+			name:      "GitHub answers something else than JSON",
+			exchanges: []cassette.Exchange{{Method: "GET", Path: "/user", Response: "<html>"}},
+			args:      []string{"status"},
+			code:      1,
+			stderr:    []string{"reading GitHub's answer to GET /user: invalid character '<'", "(GITHUB_UNREACHABLE)"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runRepo(t, "", tt.exchanges, tt.args...)
+			if got.code != tt.code {
+				t.Errorf("exit code %d, want %d\nstdout: %s\nstderr: %s", got.code, tt.code, got.stdout, got.stderr)
+			}
+			for _, want := range tt.stdout {
+				if !strings.Contains(got.stdout, want) {
+					t.Errorf("stdout lacks %q:\n%s", want, got.stdout)
+				}
+			}
+			for _, want := range tt.stderr {
+				if !strings.Contains(got.stderr, want) {
+					t.Errorf("stderr lacks %q:\n%s", want, got.stderr)
+				}
+			}
+		})
+	}
+}
+
+func TestRepositoryLogin(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer gh-token" {
+			t.Errorf("%s %s: Authorization %q, want GitHub's token", r.Method, r.URL.Path, got)
+		}
+		if strings.Contains(fmt.Sprint(r.Header), "cve-services-key") {
+			t.Errorf("%s %s: GitHub got the CVE Services key", r.Method, r.URL.Path)
+		}
+		if r.URL.Path == "/user" {
+			_, _ = io.WriteString(w, `{"login":"alice"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"default_branch":"main","permissions":{"admin":false,"push":true,"pull":true}}`)
+	}))
+	t.Cleanup(api.Close)
+	loggedOut(t, "")
+	t.Setenv("GITHUB_API_URL", api.URL)
+	t.Setenv("GH_TOKEN", "gh-token")
+	t.Setenv("CVE_API_KEY", "cve-services-key")
+
+	got := rerun("", "--url", repoURL, "login")
+	if got.code != 0 || !strings.Contains(got.stdout, "Logged in to "+repoURL+" as alice (acme, write)") ||
+		!strings.Contains(got.stdout, "GitHub keeps your login") {
+		t.Fatalf("login: exit code %d, %s%s", got.code, got.stdout, got.stderr)
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "cvedex", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"user": "alice"`) || strings.Contains(string(data), "key") {
+		t.Errorf("config: %s", data)
+	}
+	if _, err := keyring.Get("cvedex", "alice on "+repoURL); !errors.Is(err, keyring.ErrNotFound) {
+		t.Errorf("the keychain holds something for the repository: %v", err)
+	}
+	if got := rerun("", "status"); got.code != 0 || !strings.Contains(got.stdout, "alice write") {
+		t.Errorf("status with the saved login: exit code %d, %s%s", got.code, got.stdout, got.stderr)
+	}
+	if got := rerun("", "logout"); got.code != 0 || !strings.Contains(got.stdout, "Logged out of "+repoURL+" as alice.") {
+		t.Errorf("logout: exit code %d, %s%s", got.code, got.stdout, got.stderr)
+	}
+}
+
+func TestRepositoryUnreachable(t *testing.T) {
+	for _, tt := range []struct {
+		name, api, token, want string
+		args                   []string
+	}{
+		{name: "no GitHub login", args: []string{"--url", repoURL, "login"},
+			want: "no GitHub login: run gh auth login, or set GH_TOKEN"},
+		{name: "an unusable API URL", api: "http://[::1", token: "gh-token", args: []string{"status"},
+			want: "missing ']' in host"},
+		{name: "an API that is down", api: "http://127.0.0.1:1", token: "gh-token", args: []string{"status"},
+			want: "127.0.0.1:1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			loggedOut(t, repoURL)
+			t.Setenv("GITHUB_API_URL", tt.api)
+			t.Setenv("GH_TOKEN", tt.token)
+			t.Setenv("GITHUB_TOKEN", "")
+			t.Setenv("CVE_API_ORG", "acme")
+			t.Setenv("CVE_API_USER", "alice")
+			// No gh to ask for a login.
+			t.Setenv("PATH", t.TempDir())
+			if got := rerun("", tt.args...); got.code != 1 || !strings.Contains(got.stderr, tt.want) {
+				t.Errorf("exit code %d, stderr %q; want 1 and %q", got.code, got.stderr, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoginFormRepository(t *testing.T) {
+	loggedOut(t, repoURL)
+	t.Setenv("GH_TOKEN", "gh-token")
+	t.Setenv("GITHUB_API_URL", cassette.Serve(t,
+		cassette.Exchange{Method: "GET", Path: "/user", Response: `{"login":"alice"}`},
+		cassette.Exchange{Method: "GET", Path: "/repos/acme/cves", Response: `{"permissions":{"admin":true,"push":true}}`},
+	))
+	term := startTerminal(t, "login")
+	term.waitFor("> Another server")
+	term.answer("\r", "Server URL")
+	term.send("\r")
+	term.waitFor("Logged in to " + repoURL + " as alice (acme, admin)")
 	term.exits(0)
 }

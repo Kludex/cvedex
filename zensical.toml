@@ -23,6 +23,7 @@ nav = [
     "cvedexd/review.md",
     "cvedexd/api.md",
   ] },
+  { "GitHub repository" = "github.md" },
 ]
 
 [project.theme]

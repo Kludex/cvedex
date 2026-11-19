@@ -61,12 +61,13 @@ func Key(creds cveservices.Credentials) (string, error) {
 }
 
 // Save stores the API key in the system keychain and the rest in the config file at path. Without a
-// keychain, the key goes in the file, which is readable by the owner only either way.
+// keychain, the key goes in the file, which is readable by the owner only either way. A GitHub
+// repository has no key to store.
 func Save(path string, creds cveservices.Credentials) (inKeychain bool, err error) {
 	if previous, err := read(path); err == nil && previous.User != "" && account(previous) != account(creds) {
 		_ = keyring.Delete(keychainService, account(previous)) // a key that is not there is fine
 	}
-	if keyring.Set(keychainService, account(creds), creds.Key) == nil {
+	if creds.Key != "" && keyring.Set(keychainService, account(creds), creds.Key) == nil {
 		creds.Key, inKeychain = "", true
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

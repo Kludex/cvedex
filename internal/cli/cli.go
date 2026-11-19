@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Kludex/cvedex/cveservices"
 	"github.com/Kludex/cvedex/internal/config"
+	"github.com/Kludex/cvedex/internal/github"
 	"github.com/Kludex/cvedex/internal/record"
 	"github.com/Kludex/cvedex/internal/render"
 )
@@ -111,7 +113,11 @@ func (a *app) connect(cmd *cobra.Command, _ []string) error {
 	for c := cmd; c != nil; c = c.Parent() {
 		needsAuth = needsAuth && c.Annotations[annotationNoAuth] == ""
 	}
-	if creds.Key == "" && creds.User != "" {
+	switch {
+	case github.IsRepo(cmp.Or(a.url, creds.URL)):
+		// A repository takes GitHub's login, and must never see the CVE Services key.
+		creds.Key = github.Token(cmd.Context())
+	case creds.Key == "" && creds.User != "":
 		key, err := config.Key(creds)
 		if err != nil && needsAuth {
 			return err
@@ -121,7 +127,7 @@ func (a *app) connect(cmd *cobra.Command, _ []string) error {
 	if a.url != "" {
 		creds.URL = a.url
 	}
-	a.configPath, a.client = path, cveservices.New(creds)
+	a.configPath, a.client = path, newClient(creds)
 	if err := checkURL(a.client.Credentials.URL); err != nil {
 		return err
 	}
@@ -132,6 +138,16 @@ func (a *app) connect(cmd *cobra.Command, _ []string) error {
 }
 
 var errNotLoggedIn = errors.New("not logged in")
+
+// newClient returns the client for creds. A GitHub repository is served by cvedex itself, from
+// GitHub's API.
+func newClient(creds cveservices.Credentials) *cveservices.Client {
+	client := cveservices.New(creds)
+	if github.IsRepo(creds.URL) {
+		client.HTTP = github.Client(creds.Key)
+	}
+	return client
+}
 
 // checkURL refuses URLs that would send the API key in clear text, except to this machine.
 func checkURL(raw string) error {

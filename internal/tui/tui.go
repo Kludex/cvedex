@@ -427,7 +427,7 @@ func (m *Model) show(data any) {
 			if id.Cvedexd != nil {
 				state += render.Faint.Render(" " + render.Clean(id.Cvedexd.Label()))
 			}
-			rows = append(rows, table.Row{render.Clean(id.ID), state, id.Reserved.Format("2006-01-02"),
+			rows = append(rows, table.Row{render.Clean(id.ID), state, render.Day(id.Reserved),
 				render.Clean(id.RequestedBy.User)})
 		}
 	case []cveservices.ReviewItem:

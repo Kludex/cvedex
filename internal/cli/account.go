@@ -12,6 +12,7 @@ import (
 
 	"github.com/Kludex/cvedex/cveservices"
 	"github.com/Kludex/cvedex/internal/config"
+	"github.com/Kludex/cvedex/internal/github"
 	"github.com/Kludex/cvedex/internal/render"
 )
 
@@ -45,19 +46,29 @@ func (a *app) loginCommand() *cobra.Command {
 			}
 			creds.Key = key
 			var err error
-			if a.interactive() {
+			switch {
+			case github.IsRepo(creds.URL) && (!chooseURL || !a.interactive()):
+				// GitHub signs you in, so there is nothing to ask.
+			case a.interactive():
 				err = a.loginForm(cmd, &creds, chooseURL)
-			} else {
+			default:
 				err = a.loginFromFlags(&creds)
 			}
 			if err != nil {
 				return err
 			}
-			client := cveservices.New(creds)
+			owner, _, repo := github.Repo(creds.URL)
+			if repo {
+				creds.Org, creds.User, creds.Key = owner, "", github.Token(cmd.Context())
+				if creds.Key == "" {
+					return errors.New("no GitHub login: run gh auth login, or set GH_TOKEN")
+				}
+			}
+			client := newClient(creds)
 			me, err := client.User(cmd.Context(), creds.User)
 			role := ""
 			var apiErr *cveservices.Error
-			if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden {
+			if !repo && errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden {
 				// cvedexd refuses user lookups to submitters, so a 403 from it proves the token.
 				if health, healthErr := client.Health(cmd.Context()); healthErr == nil && health.IsCvedexd() {
 					me, err, role = &cveservices.User{}, nil, ", submitter"
@@ -66,12 +77,19 @@ func (a *app) loginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if repo {
+				// The token stays with GitHub's own login.
+				creds.User, creds.Key = me.Username, ""
+			}
 			inKeychain, err := config.Save(a.configPath, creds)
 			if err != nil {
 				return err
 			}
 			saved := "Saved to " + a.configPath + ", with the API key in the system keychain"
-			if !inKeychain {
+			switch {
+			case repo:
+				saved = "Saved to " + a.configPath + ". GitHub keeps your login"
+			case !inKeychain:
 				saved = "Saved to " + a.configPath + ". There is no system keychain, so the API key is in that file"
 			}
 			a.print(render.Good.Render("Logged in") + " to " + creds.URL + " as " + render.Bold.Render(creds.User) +
@@ -117,7 +135,7 @@ func (a *app) loginForm(cmd *cobra.Command, creds *cveservices.Credentials, choo
 			huh.NewInput().Title("Username").Description("Usually the email you use for CVE Services").
 				Value(&creds.User).Validate(required),
 			huh.NewInput().Title("API key").EchoMode(huh.EchoModePassword).Value(&creds.Key).Validate(required),
-		),
+		).WithHideFunc(func() bool { return chooseURL && instance == other && github.IsRepo(strings.TrimSpace(custom)) }),
 	).WithInput(a.stdin).WithOutput(a.stderr)
 	if err := form.RunWithContext(cmd.Context()); err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
@@ -198,6 +216,7 @@ func (a *app) statusCommand() *cobra.Command {
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			creds := a.client.Credentials
+			repo := github.IsRepo(creds.URL)
 			health, err := a.client.Health(cmd.Context())
 			if err != nil {
 				return err
@@ -219,10 +238,12 @@ func (a *app) statusCommand() *cobra.Command {
 				s.User, err = a.client.User(cmd.Context(), creds.User)
 				var apiErr *cveservices.Error
 				switch {
-				case health.IsCvedexd() && errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden:
+				case !repo && health.IsCvedexd() && errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden:
 					s.User, s.Submitter = nil, creds.User
 				case err != nil:
 					return err
+				case repo:
+					// A repository is not a CNA.
 				default:
 					if s.Org, err = a.client.Org(cmd.Context()); err != nil {
 						return err
@@ -245,8 +266,11 @@ func (a *app) statusCommand() *cobra.Command {
 					return strings.Join(append(lines, render.Label.Render("User")+user), "\n")
 				}
 				user := render.Bold.Render(s.User.Username) + render.Faint.Render(strings.TrimPrefix(roles(s.User.Authority), ","))
-				org := s.Org.Name + render.Faint.Render(" ("+s.Org.ShortName+")")
-				lines = append(lines, render.Label.Render("User")+user, render.Label.Render("CNA")+org)
+				lines = append(lines, render.Label.Render("User")+user)
+				if s.Org != nil {
+					org := s.Org.Name + render.Faint.Render(" ("+s.Org.ShortName+")")
+					lines = append(lines, render.Label.Render("CNA")+org)
+				}
 				return strings.Join(lines, "\n")
 			})
 		},

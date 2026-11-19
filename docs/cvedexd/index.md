@@ -47,4 +47,7 @@ The commands for review, proposals, audit and submitters work only against `cved
 
 A [Cloudflare Worker](https://developers.cloudflare.com/workers/), with [D1](https://developers.cloudflare.com/d1/) for storage. There is no machine, TLS or backup job to look after. A CNA's traffic fits in the free plan.
 
+!!! tip "Nothing to deploy"
+    A [GitHub repository](../github.md) does the same job with pull requests, if your people are on GitHub.
+
 Next: [deploy it](deploy.md).

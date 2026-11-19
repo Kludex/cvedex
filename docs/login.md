@@ -61,6 +61,14 @@ Error: http://cve.acme.org would send your API key unencrypted; use https://
 
 `http://localhost` and loopback addresses such as `http://127.0.0.1:8787` are allowed, for a [local cvedexd](cvedexd/deploy.md#run-it-locally).
 
+## Use a GitHub repository
+
+```sh
+cvedex login --url https://github.com/acme/cves
+```
+
+A URL of a repository on `github.com` asks for nothing: `cvedex` signs in with your GitHub login. See [GitHub repository](github.md).
+
 ## Use another server for one command
 
 `--url` overrides the saved server for a single command:

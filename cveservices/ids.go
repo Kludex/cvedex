@@ -23,7 +23,8 @@ type CVEID struct {
 	State       string      `json:"state"`
 	OwningCNA   string      `json:"owning_cna"`
 	RequestedBy RequestedBy `json:"requested_by"`
-	Reserved    time.Time   `json:"reserved"`
+	// Reserved is zero when the server does not know, as a GitHub repository may not.
+	Reserved time.Time `json:"reserved,omitzero"`
 	// Cvedexd is set by a cvedexd server on the IDs a submitter reserved through it.
 	Cvedexd *LocalState `json:"cvedexd,omitempty"`
 }

@@ -1513,6 +1513,16 @@ func TestRepository(t *testing.T) {
 		return cassette.Exchange{Method: "POST", Path: repo + "/git/refs", Status: status,
 			Body: `{"ref":"refs/heads/cve/` + id + `","sha":"` + sha + `"}`, Response: `{"ref":"refs/heads/cve/` + id + `"}`}
 	}
+	// log is a job's log the way GitHub serves the one of a real run of the reserve workflow.
+	log := func(ids ...string) string {
+		text := "2026-11-19T13:46:17.1550181Z \x1b[36;1mjq -r '.[] | \"::notice title=cvedex::\\(.cve_id)\"' " +
+			"ids.json\x1b[0m\n" +
+			"2026-11-19T13:46:17.1890000Z ##[notice]Runners are busy.\n"
+		for _, id := range ids {
+			text += "2026-11-19T13:46:17.5198660Z ##[notice]" + id + "\r\n"
+		}
+		return text + "2026-11-19T13:46:17.5310000Z Cleaning up orphan processes\n"
+	}
 	reserve := []string{"reserve", "--year", "2026", "--count", "2", "--sequential"}
 	approve := []string{"review", "approve", "CVE-2026-1101", "--revision", "2"}
 	merge := cassette.Exchange{Method: "PUT", Path: repo + "/pulls/4/merge", Body: `{"sha":"s4","merge_method":"squash"}`,
@@ -1542,10 +1552,7 @@ func TestRepository(t *testing.T) {
 		{
 			name: "reserve",
 			exchanges: []cassette.Exchange{info, dispatch, running, ran("success"), jobs,
-				get("/check-runs/70/annotations?per_page=100", `[`+
-					`{"annotation_level":"notice","title":"","message":"Runners are busy."},`+
-					`{"annotation_level":"notice","title":"cvedex","message":"CVE-2026-1200"},`+
-					`{"annotation_level":"notice","title":"cvedex","message":"CVE-2026-1201"}]`),
+				missing("/actions/jobs/70/logs"), get("/actions/jobs/70/logs", log("CVE-2026-1200", "CVE-2026-1201")),
 				branch("CVE-2026-1200", "abc", 201), branch("CVE-2026-1201", "abc", 422)},
 			args:   reserve,
 			stdout: []string{"Reserved 2 CVE IDs", "CVE-2026-1200", "CVE-2026-1201"},
@@ -1558,12 +1565,11 @@ func TestRepository(t *testing.T) {
 			stderr:    []string{"The reserve workflow failed: https://github.com/acme/cves/actions/runs/7 (WORKFLOW_FAILED)"},
 		},
 		{
-			name: "reserve when the workflow reserves nothing",
-			exchanges: []cassette.Exchange{info, dispatch, ran("success"), jobs,
-				get("/check-runs/70/annotations?per_page=100", `[]`)},
-			args:   reserve,
-			code:   1,
-			stderr: []string{"The reserve workflow reserved no ID: https://github.com/acme/cves/actions/runs/7"},
+			name:      "reserve when the workflow reserves nothing",
+			exchanges: []cassette.Exchange{info, dispatch, ran("success"), jobs, get("/actions/jobs/70/logs", log())},
+			args:      reserve,
+			code:      1,
+			stderr:    []string{"The reserve workflow reserved no ID: https://github.com/acme/cves/actions/runs/7"},
 		},
 		{
 			name:      "reserve when the workflow never ends",
@@ -1601,6 +1607,17 @@ func TestRepository(t *testing.T) {
 				get("/pulls?per_page=100&state=all", `[]`)},
 			args:   []string{"list", "--state", "reserved", "--year", "2026", "--json"},
 			stdout: []string{"[\n  {\n    \"cve_id\": \"CVE-2026-1103\",", "\"state\": \"reserved\"\n    }\n  }\n]"},
+		},
+		{
+			name: "list an empty repository",
+			exchanges: []cassette.Exchange{info,
+				{Method: "GET", Path: repo + "/git/trees/main?recursive=1", Status: 409,
+					Response: `{"message":"Git Repository is empty."}`},
+				{Method: "GET", Path: repo + "/git/matching-refs/heads/cve/", Status: 409,
+					Response: `{"message":"Git Repository is empty."}`},
+				get("/pulls?per_page=100&state=all", `[]`)},
+			args:   []string{"list"},
+			stdout: []string{"No CVE IDs. Reserve one with cvedex reserve."},
 		},
 		{
 			name:   "list by time",

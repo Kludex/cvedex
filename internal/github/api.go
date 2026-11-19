@@ -55,8 +55,9 @@ func (g *repo) path(format string, args ...any) string {
 	return "/repos/" + g.owner + "/" + g.name + fmt.Sprintf(format, args...)
 }
 
-// call sends one request to GitHub's API and decodes its JSON answer into out, which may be nil.
-// It reports whether GitHub did it. A status in allowed is no failure: the caller handles it.
+// call sends one request to GitHub's API and decodes its JSON answer into out, which may be nil. A
+// *string takes the answer as text. It reports whether GitHub did it. A status in allowed is no
+// failure: the caller handles it.
 func (g *repo) call(method, path string, body, out any, allowed ...int) bool {
 	if g.failed != nil {
 		return false
@@ -78,7 +79,8 @@ func (g *repo) call(method, path string, body, out any, allowed ...int) bool {
 		return g.unreachable(err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	answer := json.NewDecoder(io.LimitReader(res.Body, maxBody))
+	answer := io.LimitReader(res.Body, maxBody)
+	text, isText := out.(*string)
 	switch {
 	case slices.Contains(allowed, res.StatusCode):
 		return false
@@ -86,15 +88,18 @@ func (g *repo) call(method, path string, body, out any, allowed ...int) bool {
 		var problem struct {
 			Message string `json:"message"`
 		}
-		_ = answer.Decode(&problem)
+		_ = json.NewDecoder(answer).Decode(&problem)
 		// Only these are the caller's own. cvedex would also answer a 429 by sending everything again.
 		status := res.StatusCode
 		if !slices.Contains([]int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound}, status) {
 			status = http.StatusBadGateway
 		}
 		g.fail(status, "GITHUB_ERROR", fmt.Sprintf("GitHub: %s (%s %s)", cmp.Or(problem.Message, res.Status), method, path))
+	case isText:
+		data, _ := io.ReadAll(answer) // a log cut short still has the lines before the cut
+		*text = string(data)
 	case out != nil:
-		if err := answer.Decode(out); err != nil {
+		if err := json.NewDecoder(answer).Decode(out); err != nil {
 			return g.unreachable(fmt.Errorf("reading GitHub's answer to %s %s: %w", method, path, err))
 		}
 	}

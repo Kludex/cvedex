@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -186,7 +187,7 @@ func roles(auth cveservices.Authority) string {
 func (a *app) logoutCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:         "logout",
-		Short:       "Forget the saved credentials, the API key in the system keychain included",
+		Short:       "Forget the account in use, its API key in the system keychain included",
 		Annotations: noAuth,
 		GroupID:     groupStart,
 		Args:        cobra.NoArgs,
@@ -200,10 +201,74 @@ func (a *app) logoutCommand() *cobra.Command {
 				if creds.User == "" {
 					return "You were not logged in."
 				}
-				return render.Good.Render("Logged out") + " of " + creds.URL + " as " + render.Bold.Render(creds.User) + "."
+				text := render.Good.Render("Logged out") + " of " + creds.URL + " as " + render.Bold.Render(creds.User) + "."
+				if len(a.saved.Others) > 0 {
+					text += "\n" + nowUsing(a.saved.Others[0])
+				}
+				return text
 			})
 		},
 	}
+}
+
+func nowUsing(creds cveservices.Credentials) string {
+	return "Now using " + creds.URL + " as " + render.Bold.Render(creds.User) + "."
+}
+
+func (a *app) accountsCommand() *cobra.Command {
+	type account struct {
+		URL    string `json:"url"`
+		Org    string `json:"org"`
+		User   string `json:"user"`
+		Active bool   `json:"active"`
+	}
+	accounts := &cobra.Command{
+		Use:         "accounts",
+		Short:       "List the accounts you are logged in to",
+		Long:        "Lists the accounts you are logged in to. cvedex login adds one, cvedex logout forgets the one in use.",
+		Annotations: noAuth,
+		GroupID:     groupStart,
+		Args:        cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			list := []account{}
+			for _, c := range a.saved.Accounts() {
+				list = append(list, account{c.URL, c.Org, c.User, c == a.saved.Credentials})
+			}
+			return a.output(list, func() string {
+				if len(list) == 0 {
+					return "You are not logged in. " + hint("Run ", "cvedex login")
+				}
+				rows := make([][]string, len(list))
+				for i, account := range list {
+					rows[i] = []string{strconv.Itoa(i + 1), account.URL, account.User, account.Org, ""}
+					if account.Active {
+						rows[i][4] = "in use"
+					}
+				}
+				return render.Table([]string{"#", "SERVER", "USER", "ORG", ""}, rows, nil) + "\n" +
+					hint("Use another with ", "cvedex accounts switch <#>")
+			})
+		},
+	}
+	accounts.AddCommand(&cobra.Command{
+		Use:     "switch <#>",
+		Short:   "Use another account, by its number in cvedex accounts",
+		Example: "  cvedex accounts switch 2",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			n, err := number("account", args[0])
+			if err != nil {
+				return err
+			}
+			creds, err := config.Use(a.configPath, a.saved, n)
+			if err != nil {
+				return err
+			}
+			creds.Key = ""
+			return a.output(creds, func() string { return nowUsing(creds) })
+		},
+	})
+	return accounts
 }
 
 func (a *app) statusCommand() *cobra.Command {

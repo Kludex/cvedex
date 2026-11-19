@@ -69,6 +69,27 @@ cvedex login --url https://github.com/acme/cves
 
 A URL of a repository on `github.com` asks for nothing: `cvedex` signs in with your GitHub login. See [GitHub repository](github.md).
 
+## Several accounts
+
+Each `cvedex login` adds an account and uses it. The ones you logged in to before stay:
+
+```console
+$ cvedex accounts
+#   SERVER                            USER                 ORG
+1   https://cveawg-test.mitre.org     alice@acme.org       acme
+2   https://cveawg.mitre.org          alice@acme.org       acme   in use
+3   https://github.com/acme/cves      alice                acme
+Use another with cvedex accounts switch <#>
+
+$ cvedex accounts switch 1
+Now using https://cveawg-test.mitre.org as alice@acme.org.
+```
+
+An account is a username on a server. Logging in to it again replaces its key.
+
+!!! tip "Check before you publish"
+    `cvedex status` says which account a command will use. Writes to MITRE production ask first either way.
+
 ## Use another server for one command
 
 `--url` overrides the saved server for a single command:
@@ -97,7 +118,13 @@ $ cvedex logout
 Logged out of https://cveawg-test.mitre.org as alice@acme.org.
 ```
 
-`logout` deletes `config.json` and the API key in your keychain. Logging in as someone else, or to another server, also removes the previous key from the keychain, so old keys do not pile up.
+`logout` forgets the account in use and deletes its API key from your keychain. If you are logged in to others, `cvedex` says which one it uses next:
+
+```console
+$ cvedex logout
+Logged out of https://cveawg-test.mitre.org as alice@acme.org.
+Now using https://cveawg.mitre.org as alice@acme.org.
+```
 
 !!! note "Environment variables still apply"
     `logout` only forgets what `login` saved. If `CVE_API_*` variables are set, `cvedex` keeps using them.

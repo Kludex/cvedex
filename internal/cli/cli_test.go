@@ -981,27 +981,52 @@ func TestLogin(t *testing.T) {
 	}
 }
 
-func TestLoginElsewhere(t *testing.T) {
+func TestAccounts(t *testing.T) {
 	user := cassette.Load(t, "user")
 	user.User = "alice@acme.test"
 	first, second := cassette.Serve(t, user), cassette.Serve(t, user)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	loggedOut(t, "")
+	if got := rerun("", "accounts"); got.code != 0 || !strings.Contains(got.stdout, "You are not logged in.") {
+		t.Errorf("accounts when logged out: exit code %d, %s%s", got.code, got.stdout, got.stderr)
+	}
 	for _, url := range []string{first, second} {
-		var stdout, stderr bytes.Buffer
-		args := []string{"--url", url, "login", "--org", "acme", "--user", "alice@acme.test"}
-		if code := cli.Main(context.Background(), args, strings.NewReader("the-key\n"), &stdout, &stderr); code != 0 {
-			t.Fatalf("login to %s: exit code %d, %s", url, code, stderr.String())
+		if got := rerun("the-key\n", "--url", url, "login", "--org", "acme", "--user", "alice@acme.test"); got.code != 0 {
+			t.Fatalf("login to %s: exit code %d, %s", url, got.code, got.stderr)
 		}
 	}
-	if _, err := keyring.Get("cvedex", "alice@acme.test on "+first); !errors.Is(err, keyring.ErrNotFound) {
-		t.Errorf("the key for %s is still in the keychain: %v", first, err)
+	for _, url := range []string{first, second} {
+		if key, err := keyring.Get("cvedex", "alice@acme.test on "+url); key != "the-key" {
+			t.Errorf("the key for %s is %q, %v", url, key, err)
+		}
 	}
-	if key, err := keyring.Get("cvedex", "alice@acme.test on "+second); key != "the-key" {
-		t.Errorf("the key for %s is %q, %v", second, key, err)
+	// Accounts are numbered by URL, whichever is in use.
+	number := map[bool]string{true: "1", false: "2"}
+	for _, tt := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"accounts"}, 0, number[second < first] + "   " + second + "   alice@acme.test   acme   in use\n"},
+		{[]string{"accounts"}, 0, number[first < second] + "   " + first + "   alice@acme.test   acme\n"},
+		{[]string{"accounts", "--json"}, 0, `"active": true`},
+		{[]string{"accounts", "switch", "3"}, 1, "there is no account 3, see cvedex accounts"},
+		{[]string{"accounts", "switch", "first"}, 1, `account ID must be a number, not "first"`},
+		{[]string{"accounts", "switch", number[first < second]}, 0, "Now using " + first + " as alice@acme.test."},
+		{[]string{"accounts"}, 0, first + "   alice@acme.test   acme   in use\n"},
+		{[]string{"logout"}, 0, "Logged out of " + first + " as alice@acme.test.\nNow using " + second + " as"},
+		{[]string{"logout", "--json"}, 0, `"url": "` + second + `"`},
+		{[]string{"accounts"}, 0, "You are not logged in."},
+	} {
+		got := rerun("", tt.args...)
+		output := got.stdout + got.stderr
+		if got.code != tt.code || !strings.Contains(output, tt.want) || strings.Contains(output, "the-key") {
+			t.Errorf("%v: exit code %d, %s%s; want %d and %q", tt.args, got.code, got.stdout, got.stderr, tt.code, tt.want)
+		}
 	}
-	got := rerun("", "logout", "--json")
-	if want := `"user": "alice@acme.test"`; !strings.Contains(got.stdout, want) || strings.Contains(got.stdout, "key") {
-		t.Errorf("logout --json: %s", got.stdout)
+	for _, url := range []string{first, second} {
+		if _, err := keyring.Get("cvedex", "alice@acme.test on "+url); !errors.Is(err, keyring.ErrNotFound) {
+			t.Errorf("the key for %s is still in the keychain: %v", url, err)
+		}
 	}
 }
 

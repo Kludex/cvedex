@@ -47,7 +47,9 @@ type app struct {
 	json           bool
 	url            string
 	configPath     string
-	client         *cveservices.Client
+	// saved is the config file as it was read, without the environment's overrides.
+	saved  config.File
+	client *cveservices.Client
 }
 
 const (
@@ -80,7 +82,7 @@ func (a *app) root() *cobra.Command {
 		&cobra.Group{ID: groupCvedexd, Title: "cvedexd policy server:"},
 		&cobra.Group{ID: groupTools, Title: "Interfaces:"},
 	)
-	root.AddCommand(a.loginCommand(), a.logoutCommand(), a.statusCommand())
+	root.AddCommand(a.loginCommand(), a.logoutCommand(), a.statusCommand(), a.accountsCommand())
 	root.AddCommand(a.recordCommands()...)
 	root.AddCommand(a.orgCommand())
 	root.AddCommand(a.cvedexdCommands()...)
@@ -105,10 +107,11 @@ func (a *app) connect(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	creds, err := config.Load(path)
+	saved, err := config.Read(path)
 	if err != nil {
 		return err
 	}
+	creds := config.Env(saved.Credentials)
 	needsAuth := true
 	for c := cmd; c != nil; c = c.Parent() {
 		needsAuth = needsAuth && c.Annotations[annotationNoAuth] == ""
@@ -127,7 +130,7 @@ func (a *app) connect(cmd *cobra.Command, _ []string) error {
 	if a.url != "" {
 		creds.URL = a.url
 	}
-	a.configPath, a.client = path, newClient(creds)
+	a.configPath, a.saved, a.client = path, saved, newClient(creds)
 	if err := checkURL(a.client.Credentials.URL); err != nil {
 		return err
 	}

@@ -251,13 +251,12 @@ private struct Part<Content: View>: View {
     }
 }
 
-/// A description, with its Markdown links and emphasis rendered.
+/// A description, as typed: it is plain text, so `__init__` is not Markdown for a bold "init".
 private struct Prose: View {
     let text: String
 
     var body: some View {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        Text((try? AttributedString(markdown: text, options: options)) ?? AttributedString(text))
+        Text(verbatim: text)
             .lineSpacing(3)
             .frame(maxWidth: 680, alignment: .leading)
             .textSelection(.enabled)

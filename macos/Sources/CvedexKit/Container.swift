@@ -41,6 +41,8 @@ public struct Container: Equatable, Sendable {
         set {
             var list = descriptions
             var description = list[summaryIndex].object ?? [:]
+            // An advisory's description comes with a copy as HTML, which would go on saying the old text.
+            if description[text: "value"] != newValue { description["supportingMedia"] = nil }
             description[text: "value"] = newValue
             list[summaryIndex] = .object(description)
             fields["descriptions"] = .array(list)

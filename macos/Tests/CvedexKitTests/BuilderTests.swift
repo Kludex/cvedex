@@ -49,6 +49,12 @@ import Testing
         #expect(container.summary == "")
         container.summary = "Fixed."
         #expect(container.fields["descriptions"] == .array([.object(["value": .string("Fixed.")])]))
+        let html = JSONValue.array([.object(["type": .string("text/html"), "value": .string("<p>Fixed.</p>")])])
+        container.fields["descriptions"] = .array([.object(["value": .string("Fixed."), "supportingMedia": html])])
+        container.summary = "Fixed."
+        #expect(container.fields["descriptions"]?.array?[0].object?["supportingMedia"] == html)
+        container.summary = "Fixed in 1.2."
+        #expect(container.fields["descriptions"] == .array([.object(["value": .string("Fixed in 1.2.")])]))
         container.title = "widget: flaw"
         #expect(container.fields["title"] == .string("widget: flaw"))
         container.title = ""

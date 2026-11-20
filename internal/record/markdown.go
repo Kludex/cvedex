@@ -24,10 +24,12 @@ func describe(markdown string) text {
 	_ = html.New(html.WithExtensions(
 		extension.NewTableHTMLRenderer(), extension.NewStrikethroughHTMLRenderer(),
 	)).Render(&rendered, source, doc)
+	// goldmark marks each piece of raw HTML it leaves out, and a record has no use for the marks.
+	markup := strings.ReplaceAll(rendered.String(), "<!-- raw HTML omitted -->", "")
 	return text{
 		Lang:            "en",
 		Value:           plainBlocks(doc, source),
-		SupportingMedia: []media{{Type: "text/html", Value: strings.TrimSpace(rendered.String())}},
+		SupportingMedia: []media{{Type: "text/html", Value: strings.TrimSpace(markup)}},
 	}
 }
 

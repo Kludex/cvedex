@@ -327,7 +327,7 @@ func TestFromAdvisoryDescription(t *testing.T) {
 			t.Errorf("the HTML has no %s:\n%s", want, media.Value)
 		}
 	}
-	for _, unwanted := range []string{"<b>", "<div>", "\r"} {
+	for _, unwanted := range []string{"<b>", "<div>", "<!--", "\r"} {
 		if strings.Contains(media.Value, unwanted) {
 			t.Errorf("the HTML has %q:\n%s", unwanted, media.Value)
 		}

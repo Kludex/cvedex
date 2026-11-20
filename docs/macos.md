@@ -34,7 +34,7 @@ Every write asks first. The dialog names the ID and says it will be public. **Up
 
 | Section | What you fill in |
 | --- | --- |
-| Summary and Description | A title, and what an attacker can do. The description takes Markdown. |
+| Summary and Description | A title, and what an attacker can do, in plain text: cve.org does not render Markdown. |
 | Affected product | Vendor, product, repository, package registry, the version scheme, and the versions, such as *affected from 0 before 1.2.3* |
 | Weaknesses | CWE IDs, picked from MITRE's list by number or by name |
 | Severity | A CVSS 4.0 score, a CVSS 3.1 score, or both. Pick each metric, and the app computes the vector and the score. |

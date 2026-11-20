@@ -13,6 +13,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
+	github.com/yuin/goldmark/v2 v2.1.16
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/text v0.14.0
 )

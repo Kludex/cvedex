@@ -282,3 +282,54 @@ func TestCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestFromAdvisoryDescription(t *testing.T) {
+	markdown := "### Summary\r\n\r\nA `key`, *emphasis* and ~~struck~~ text,\r\nover two lines.  \r\nAfter a hard " +
+		"break.\r\n\r\nSee [the fix](https://example.com/fix), [https://example.com/same](https://example.com/same), " +
+		"<https://example.com/auto>, https://example.com/bare, <b>raw</b> and ![a diagram](https://example.com/d.png).\r\n" +
+		"\r\n<div>\r\nA block of HTML\r\n</div>\r\n\r\n---\r\n\r\n```python\r\nx = 1\r\n\r\ny = 2\r\n```\r\n\r\n" +
+		"> Quoted\r\n> text\r\n\r\n- tight\r\n- list\r\n\r\n3. a loose\r\n\r\n4. list\r\n   continued\r\n\r\n" +
+		"| Version | Fixed |\r\n| --- | --- |\r\n| 1.0 | no |\r\n| 1.1 | yes |\r\n\r\nBy [reference].\r\n\r\n" +
+		"[reference]: https://example.com/ref"
+	fields := fromAdvisory(t, map[string]any{"description": markdown})
+	var descriptions []struct {
+		Lang            string `json:"lang"`
+		Value           string `json:"value"`
+		SupportingMedia []struct {
+			Type   string `json:"type"`
+			Base64 bool   `json:"base64"`
+			Value  string `json:"value"`
+		} `json:"supportingMedia"`
+	}
+	if err := json.Unmarshal(fields["descriptions"], &descriptions); err != nil {
+		t.Fatal(err)
+	}
+	plain := "Summary\n\nA key, emphasis and struck text,\nover two lines.\nAfter a hard break.\n\n" +
+		"See the fix (https://example.com/fix), https://example.com/same, https://example.com/auto, " +
+		"https://example.com/bare, raw and a diagram.\n\n    x = 1\n\n    y = 2\n\n> Quoted\n> text\n\n" +
+		"- tight\n- list\n\n3. a loose\n\n4. list\n   continued\n\nVersion | Fixed\n1.0 | no\n1.1 | yes\n\n" +
+		"By reference (https://example.com/ref)."
+	if got := descriptions[0].Value; got != plain {
+		t.Errorf("value:\n%s\nwant:\n%s", got, plain)
+	}
+	if len(descriptions) != 1 || len(descriptions[0].SupportingMedia) != 1 {
+		t.Fatalf("descriptions %s", fields["descriptions"])
+	}
+	media := descriptions[0].SupportingMedia[0]
+	if media.Type != "text/html" || media.Base64 {
+		t.Errorf("supportingMedia %+v", media)
+	}
+	for _, want := range []string{
+		"<h3>Summary</h3>", "<code>key</code>", "<del>struck</del>", `<a href="https://example.com/fix">the fix</a>`,
+		`<a href="https://example.com/bare">`, `<pre><code class="language-python">x = 1`, "<blockquote>", "<table>",
+	} {
+		if !strings.Contains(media.Value, want) {
+			t.Errorf("the HTML has no %s:\n%s", want, media.Value)
+		}
+	}
+	for _, unwanted := range []string{"<b>", "<div>", "\r"} {
+		if strings.Contains(media.Value, unwanted) {
+			t.Errorf("the HTML has %q:\n%s", unwanted, media.Value)
+		}
+	}
+}

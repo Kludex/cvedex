@@ -106,8 +106,14 @@ type (
 		Source       source        `json:"source"`
 	}
 	text struct {
-		Lang  string `json:"lang"`
-		Value string `json:"value"`
+		Lang            string  `json:"lang"`
+		Value           string  `json:"value"`
+		SupportingMedia []media `json:"supportingMedia,omitempty"`
+	}
+	media struct {
+		Type   string `json:"type"`
+		Base64 bool   `json:"base64"`
+		Value  string `json:"value"`
 	}
 	affected struct {
 		Vendor        string    `json:"vendor"`
@@ -174,7 +180,7 @@ var link = regexp.MustCompile("https?://[^\\s<>()\\[\\]\"'`]+")
 func (a advisory) container(owner, repo string) container {
 	c := container{
 		Title:        title(repo, a.Summary),
-		Descriptions: []text{{Lang: "en", Value: strings.ReplaceAll(a.Description, "\r\n", "\n")}},
+		Descriptions: []text{describe(a.Description)},
 		References:   []reference{{URL: a.HTMLURL, Tags: []string{"vendor-advisory"}}},
 		Source:       source{Advisory: a.GHSAID, Discovery: "UNKNOWN"},
 	}
